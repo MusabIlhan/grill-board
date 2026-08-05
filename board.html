@@ -698,8 +698,14 @@
   const saveSeen = () => { if (boardId) localStorage.setItem(`gb.seen.${boardId}`, JSON.stringify([...seenIds])); };
 
   // ------------------------------------------------------------ network
+  // When the board is served with --token, it arrives in the page's own URL and
+  // has to ride along on every request — otherwise the page 401s against the
+  // board it was just loaded from.
+  const TOKEN = new URLSearchParams(location.search).get('t');
+  const api = (path) => (TOKEN ? path + (path.includes('?') ? '&' : '?') + 't=' + encodeURIComponent(TOKEN) : path);
+
   async function post(path, body) {
-    const r = await fetch(path, {
+    const r = await fetch(api(path), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
@@ -727,7 +733,7 @@
   async function poll() {
     let delay = 1500;
     try {
-      const r = await fetch('/api/state', { cache: 'no-store' });
+      const r = await fetch(api('/api/state'), { cache: 'no-store' });
       if (!r.ok) throw new Error('bad status');
       const s = await r.json();
       setOffline(false);

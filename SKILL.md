@@ -134,6 +134,7 @@ building. Offer to stop the server.
   "thread": "Conflict resolution",
   "parentId": "q4",
   "title": "What wins when two devices edit the same piece offline?",
+  "spoken": "Two devices edit the same piece offline, then both sync. One of those edits has to lose. Should the later timestamp just win, or should the two be merged field by field?",
   "context": "Both clients stamp `updatedAt` locally...\n\n```ts\n// pieceProgressStore.ts:88\n```\n\n| | last-write-wins | per-field merge |\n|---|---|---|\n| cost | ~20 lines | ~200 |",
   "recommendation": "Last-write-wins. Two-device conflicts need the same piece within one sync window — rare enough that the merge cost isn't repaid.",
   "options": [
@@ -149,6 +150,12 @@ building. Offer to stop the server.
 Rules that make or break this:
 
 - **`title` is one line.** The decision, phrased as a question. Not a paragraph.
+- **`spoken` is that question for the ear.** A voice client reads it aloud, and
+  the listener has no screen — so no file paths, no code, no "the table above".
+  Name the tension in a sentence or two and make the choice audible. Test: could
+  someone answer it having heard only this? If not, the card is doing too much
+  and wants splitting. Write one for every card; without it a narrator has to
+  improvise from `context`, which is where the detail quietly goes missing.
 - **`context` carries the weight.** Real file paths and line numbers, the actual
   code, the actual numbers, the tradeoff table. This is the whole reason the
   board exists — use the space. Long is fine; vague is not.
@@ -189,7 +196,8 @@ thread ends when the next question would not change what gets built.
 
 | | |
 |---|---|
-| `serve --state P [--port N] [--host H] [--title T] [--subtitle S] [--max-open N]` | start the board, print URLs (the subtitle is the title's tooltip — keep the title itself short and load-bearing) |
+| `serve --state P [--port N] [--host H] [--title T] [--subtitle S] [--max-open N] [--token]` | start the board, print URLs (the subtitle is the title's tooltip — keep the title itself short and load-bearing) |
+| `mcp --state P` | MCP over stdio, so another session can read and answer this board. Also served at `POST /mcp` for a client that must reach it over a network |
 | `add --state P --file F` | append questions (JSON array; `-` for stdin) |
 | `new --state P` | unprocessed events as JSON, advances the cursor |
 | `watch --state P` | one stdout line per event — for `Monitor` |

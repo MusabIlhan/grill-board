@@ -2,7 +2,7 @@
 // grill-board — a local question board the agent writes to and the user answers
 // out of order, at their own pace. Zero dependencies.
 //
-//   node board.mjs serve  --state <path> [--port N] [--host H] [--title T] [--max-open N]
+//   node board.mjs serve  --state <path> [--port N] [--host H] [--title T] [--max-open N] [--token]
 //   node board.mjs add    --state <path> --file <questions.json|->
 //   node board.mjs new    --state <path>            # unprocessed events, advances cursor
 //   node board.mjs watch  --state <path>            # one stdout line per new event
@@ -10,6 +10,7 @@
 //   node board.mjs note   --state <path> --text "what the agent is doing right now"
 //   node board.mjs status --state <path>
 //   node board.mjs export --state <path> [--out transcript.md]
+//   node board.mjs mcp    --state <path>            # MCP over stdio (also at POST /mcp)
 
 import { createServer } from 'node:http';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, statSync, renameSync } from 'node:fs';
@@ -188,6 +189,10 @@ function addQuestions(s, list) {
       depth: parent ? (parent.depth || 0) + 1 : 0,
       thread: raw.thread || (parent ? parent.thread : 'General'),
       title: String(raw.title || '').trim(),
+      // The one sentence a voice client reads aloud. `context` is written to be
+      // READ — code, tables, file:line — and is unusable spoken, so the agent
+      // authors the speakable form rather than leaving a narrator to guess.
+      spoken: String(raw.spoken || '').trim(),
       context: raw.context || '',
       recommendation: raw.recommendation || '',
       options: (raw.options || []).map((o, i) => ({
@@ -218,7 +223,192 @@ function addQuestions(s, list) {
   return added;
 }
 
+// ------------------------------------------------------- recording answers
+// Shared by the HTTP API and the MCP tools, so a voice client and the page
+// cannot drift into recording answers differently.
+
+function recordAnswer(p, body) {
+  return mutate(p, (cur) => {
+    const q = cur.questions.find((x) => x.id === body.id);
+    if (!q) return { ok: false, error: 'unknown question' };
+    q.status = 'answered';
+    q.answer = {
+      keys: Array.isArray(body.keys) ? body.keys : [],
+      text: typeof body.text === 'string' && body.text.trim() ? body.text.trim() : null,
+      at: new Date().toISOString(),
+    };
+    pushEvent(cur, { type: 'answer', id: q.id, thread: q.thread, title: q.title, answer: q.answer });
+    return { ok: true, id: q.id };
+  });
+}
+
+function recordAsk(p, body) {
+  const kind = String(body.kind || '');
+  if (!ASK_KINDS.includes(kind)) return { ok: false, error: 'unknown kind' };
+  return mutate(p, (cur) => {
+    const q = cur.questions.find((x) => x.id === body.id);
+    if (!q) return { ok: false, error: 'unknown question' };
+    q.ask = { kind, at: new Date().toISOString() };
+    pushEvent(cur, { type: 'ask', kind, id: q.id, thread: q.thread, title: q.title });
+    return { ok: true, id: q.id };
+  });
+}
+
+// ------------------------------------------------------------------- mcp
+// A hand-rolled JSON-RPC subset — enough for tools, and no dependency. Served
+// two ways: over stdio for a second session on this machine, and at POST /mcp
+// for one that has to reach the board across a network.
+
+const MCP_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
+
+const MCP_TOOLS = [
+  {
+    name: 'list_questions',
+    description:
+      'The questions currently open on the grill board, each with the one-line spoken form and its choices. ' +
+      'Ask them ONE AT A TIME in conversation — never read the whole list out.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'read_question',
+    description:
+      'The full detail behind one question — the code, tables and tradeoffs the spoken line compresses. ' +
+      'Use it when they ask for the detail; read it out deliberately rather than paraphrasing.',
+    inputSchema: {
+      type: 'object',
+      properties: { id: { type: 'string', description: 'question id, e.g. q7' } },
+      required: ['id'], additionalProperties: false,
+    },
+  },
+  {
+    name: 'answer',
+    description:
+      'Record their answer and move on. Pass what they ACTUALLY SAID as `text` — that is the normal path, and the ' +
+      'grilling session reads it. Only set `keys` when they clearly named one of the listed choices. Never invent an ' +
+      'answer, and never answer on their behalf.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        text: { type: 'string', description: 'their answer in their own words' },
+        keys: { type: 'array', items: { type: 'string' }, description: 'option keys, only if they named one' },
+      },
+      required: ['id'], additionalProperties: false,
+    },
+  },
+  {
+    name: 'ask_better',
+    description:
+      'They cannot answer it as written, so send it back to be re-asked. ' +
+      'simpler = too dense; implications = they want what each choice would cost them; ' +
+      'perspective = they want the angle needed to judge it.',
+    inputSchema: {
+      type: 'object',
+      properties: { id: { type: 'string' }, kind: { type: 'string', enum: ASK_KINDS } },
+      required: ['id', 'kind'], additionalProperties: false,
+    },
+  },
+  {
+    name: 'board_status',
+    description: 'How many questions are open, answered and still queued.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+];
+
+function mcpRead(p) {
+  const s = peek(p);
+  if (!s) throw new Error('no board at that path yet');
+  return s;
+}
+
+function describeQuestion(q, { full = false } = {}) {
+  const lines = [`${q.id} · ${q.thread}`, q.spoken || q.title];
+  if (full) {
+    if (q.spoken && q.title !== q.spoken) lines.push('', `Question: ${q.title}`);
+    if (q.context) lines.push('', q.context);
+    if (q.recommendation) lines.push('', `Claude's take: ${q.recommendation}`);
+  }
+  if (q.options.length) {
+    lines.push('');
+    for (const o of q.options) {
+      lines.push(`  ${o.key}) ${o.label}${o.recommended ? '  [Claude picks this]' : ''}${o.detail ? ` — ${o.detail}` : ''}`);
+    }
+    if (q.multi) lines.push('  (more than one may apply)');
+  }
+  return lines.join('\n');
+}
+
+function callTool(p, name, a = {}) {
+  if (name === 'list_questions') {
+    const open = mcpRead(p).questions.filter((q) => q.status === 'open');
+    if (!open.length) return 'Nothing open right now — Claude may still be writing more. Try again shortly.';
+    return [`${open.length} open.`, '', ...open.map((q) => describeQuestion(q) + '\n')].join('\n');
+  }
+  if (name === 'read_question') {
+    const q = mcpRead(p).questions.find((x) => x.id === a.id);
+    if (!q) return `No question ${a.id} on this board.`;
+    return describeQuestion(q, { full: true });
+  }
+  if (name === 'answer') {
+    if (!a.id) return 'Need the question id.';
+    if (!a.text && !(a.keys || []).length) return 'Nothing to record — pass what they said as `text`.';
+    const out = recordAnswer(p, a);
+    return out.ok ? `Recorded for ${a.id}. Claude has been woken and will branch from it.` : `Could not record: ${out.error}`;
+  }
+  if (name === 'ask_better') {
+    const out = recordAsk(p, a);
+    return out.ok
+      ? `Sent ${a.id} back to be re-asked (${a.kind}). It will reappear rewritten.`
+      : `Could not send it back: ${out.error}`;
+  }
+  if (name === 'board_status') {
+    const s = mcpRead(p);
+    const c = counts(s);
+    return `${c.answered} answered, ${c.open} open, ${c.queued} still queued.`;
+  }
+  throw new Error(`unknown tool: ${name}`);
+}
+
+const rpcOk = (id, result) => ({ jsonrpc: '2.0', id, result });
+const rpcErr = (id, code, message) => ({ jsonrpc: '2.0', id, error: { code, message } });
+
+// Returns the reply, or null for a notification (which must not be answered).
+function handleRpc(p, msg) {
+  const { id, method, params } = msg || {};
+  if (!method) return null;
+  if (method.startsWith('notifications/')) return null;
+
+  if (method === 'initialize') {
+    const want = params && params.protocolVersion;
+    return rpcOk(id, {
+      protocolVersion: MCP_VERSIONS.includes(want) ? want : MCP_VERSIONS[0],
+      capabilities: { tools: { listChanged: false } },
+      serverInfo: { name: 'grill-board', version: '1.0.0' },
+      instructions:
+        'A board of open questions someone is answering out loud. Ask ONE at a time, in your own words, using the ' +
+        'spoken line. Let them answer however they like and record what they actually said — do not push them ' +
+        'towards the listed choices, and never answer for them. If they want the detail, read_question. If they ' +
+        'cannot answer it as written, ask_better rather than pressing.',
+    });
+  }
+  if (method === 'ping') return rpcOk(id, {});
+  if (method === 'tools/list') return rpcOk(id, { tools: MCP_TOOLS });
+  if (method === 'tools/call') {
+    const name = params && params.name;
+    try {
+      return rpcOk(id, { content: [{ type: 'text', text: callTool(p, name, (params && params.arguments) || {}) }] });
+    } catch (e) {
+      return rpcOk(id, { content: [{ type: 'text', text: `Error: ${e.message}` }], isError: true });
+    }
+  }
+  return rpcErr(id, -32601, `unknown method: ${method}`);
+}
+
 // ---------------------------------------------------------------- server
+
+function randomToken() {
+  return Array.from({ length: 4 }, () => Math.random().toString(36).slice(2, 10)).join('');
+}
 
 function lanAddress() {
   for (const iface of Object.values(networkInterfaces())) {
@@ -241,6 +431,24 @@ async function findPort(host, preferred) {
     if (free) return port;
   }
   die('no free port in 7800-7859');
+}
+
+// Off by default: on a LAN board a token is friction for nothing. It becomes
+// mandatory the moment the board is tunnelled somewhere public, which is what
+// remote MCP needs — an open board is one a stranger can read AND answer.
+let TOKEN = null;
+
+const CORS = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-headers': 'content-type, authorization, mcp-protocol-version',
+  'access-control-allow-methods': 'POST, GET, OPTIONS',
+};
+
+function authOk(req, url) {
+  if (!TOKEN) return true;
+  const h = req.headers.authorization || '';
+  if (h.startsWith('Bearer ') && h.slice(7) === TOKEN) return true;
+  return url.searchParams.get('t') === TOKEN;
 }
 
 function json(res, code, body) {
@@ -274,6 +482,10 @@ async function serve() {
     if (args.title) cur.title = args.title;
     if (args.subtitle) cur.subtitle = String(args.subtitle);
     if (args['max-open']) cur.maxOpen = Number(args['max-open']);
+    // Persisted so a restart keeps the same URL — otherwise every restart
+    // invalidates the link already open on a phone.
+    if (args.token) cur.token = args.token === true ? (cur.token || randomToken()) : String(args.token);
+    TOKEN = args.token ? cur.token : null;
   });
 
   const host = args.host || '0.0.0.0';
@@ -285,6 +497,20 @@ async function serve() {
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     try {
+      if (req.method === 'OPTIONS') { res.writeHead(204, CORS); return res.end(); }
+      if (!authOk(req, url)) return json(res, 401, { ok: false, error: 'unauthorized' });
+
+      // MCP, for a client that talks to the board instead of looking at it.
+      if (url.pathname === '/mcp') {
+        if (req.method !== 'POST') { res.writeHead(405, CORS); return res.end('POST JSON-RPC here'); }
+        const body = await readBody(req);
+        const batch = Array.isArray(body);
+        const replies = (batch ? body : [body]).map((m) => handleRpc(p, m)).filter(Boolean);
+        if (!replies.length) { res.writeHead(202, CORS); return res.end(); }
+        res.writeHead(200, { ...CORS, 'content-type': 'application/json' });
+        return res.end(JSON.stringify(batch ? replies : replies[0]));
+      }
+
       if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
         return res.end(html());
@@ -308,18 +534,7 @@ async function serve() {
 
       if (req.method === 'POST' && url.pathname === '/api/answer') {
         const body = await readBody(req);
-        const out = mutate(p, (cur) => {
-          const q = cur.questions.find((x) => x.id === body.id);
-          if (!q) return { ok: false, error: 'unknown question' };
-          q.status = 'answered';
-          q.answer = {
-            keys: Array.isArray(body.keys) ? body.keys : [],
-            text: typeof body.text === 'string' && body.text.trim() ? body.text.trim() : null,
-            at: new Date().toISOString(),
-          };
-          pushEvent(cur, { type: 'answer', id: q.id, thread: q.thread, title: q.title, answer: q.answer });
-          return { ok: true };
-        });
+        const out = recordAnswer(p, body);
         return json(res, out.ok ? 200 : 404, out);
       }
 
@@ -328,16 +543,8 @@ async function serve() {
       // getting a route of its own.
       if (req.method === 'POST' && url.pathname === '/api/ask') {
         const body = await readBody(req);
-        const kind = String(body.kind || '');
-        if (!ASK_KINDS.includes(kind)) return json(res, 400, { ok: false, error: 'unknown kind' });
-        const out = mutate(p, (cur) => {
-          const q = cur.questions.find((x) => x.id === body.id);
-          if (!q) return { ok: false, error: 'unknown question' };
-          q.ask = { kind, at: new Date().toISOString() };
-          pushEvent(cur, { type: 'ask', kind, id: q.id, thread: q.thread, title: q.title });
-          return { ok: true };
-        });
-        return json(res, out.ok ? 200 : 404, out);
+        const out = recordAsk(p, body);
+        return json(res, out.ok ? 200 : (out.error === 'unknown kind' ? 400 : 404), out);
       }
 
       if (req.method === 'POST' && url.pathname === '/api/reopen') {
@@ -378,13 +585,17 @@ async function serve() {
 
   server.listen(port, host, () => {
     const lan = lanAddress();
-    const local = `http://localhost:${port}`;
+    const q = TOKEN ? `?t=${TOKEN}` : '';
+    const local = `http://localhost:${port}/${q}`;
+    const phone = lan && host === '0.0.0.0' ? `http://${lan}:${port}/${q}` : null;
     // Both URLs land in a file next to the state so the caller can read them
     // without waiting on this process's stdout.
-    writeFileSync(join(dirname(p), 'url'), lan && host === '0.0.0.0' ? `${local}\nhttp://${lan}:${port}\n` : `${local}\n`);
+    writeFileSync(join(dirname(p), 'url'), phone ? `${local}\n${phone}\n` : `${local}\n`);
     process.stdout.write(`grill-board listening\n`);
     process.stdout.write(`  local  ${local}\n`);
-    if (lan && host === '0.0.0.0') process.stdout.write(`  phone  http://${lan}:${port}\n`);
+    if (phone) process.stdout.write(`  phone  ${phone}\n`);
+    process.stdout.write(`  mcp    http://localhost:${port}/mcp${q}\n`);
+    if (TOKEN) process.stdout.write(`  token  ${TOKEN}  (also accepted as: Authorization: Bearer …)\n`);
     process.stdout.write(`  state  ${p}\n`);
   });
 }
@@ -555,13 +766,37 @@ function cmdExport() {
 
 // ---------------------------------------------------------------- dispatch
 
+// MCP over stdio, for a second session on this machine — no port, no token,
+// no tunnel. The HTTP transport at /mcp is for one that has to reach across a
+// network; both call the same handleRpc.
+async function cmdMcp() {
+  const p = statePath();
+  let buf = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', (chunk) => {
+    buf += chunk;
+    for (let i = buf.indexOf('\n'); i >= 0; i = buf.indexOf('\n')) {
+      const line = buf.slice(0, i).trim();
+      buf = buf.slice(i + 1);
+      if (!line) continue;
+      let msg;
+      try { msg = JSON.parse(line); } catch { continue; }
+      let reply;
+      try { reply = handleRpc(p, msg); } catch (e) { reply = rpcErr(msg && msg.id, -32603, e.message); }
+      if (reply) process.stdout.write(JSON.stringify(reply) + '\n');
+    }
+  });
+  process.stdin.on('end', () => process.exit(0));
+  await new Promise(() => {}); // serve until stdin closes
+}
+
 const verbs = {
   serve, add: cmdAdd, new: cmdNew, watch: cmdWatch, retire: cmdRetire,
-  note: cmdNote, status: cmdStatus, export: cmdExport,
+  note: cmdNote, status: cmdStatus, export: cmdExport, mcp: cmdMcp,
 };
 
 if (!cmd || !verbs[cmd]) {
-  process.stderr.write('usage: board.mjs <serve|add|new|watch|retire|note|status|export> --state <path>\n');
+  process.stderr.write('usage: board.mjs <serve|add|new|watch|retire|note|status|export|mcp> --state <path>\n');
   process.exit(1);
 }
 await verbs[cmd]();

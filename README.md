@@ -84,6 +84,40 @@ Tokyo Night, GitHub), light and dark. All 16 combinations were contrast-audited:
 every text pair clears WCAG AA, every glyph clears 3:1. Default is Nord dark; the
 choice persists across boards.
 
+## Answering out loud
+
+The board is also an MCP server, so another session — one with a voice mode, on
+your phone — can read the questions and record your answers. It talks; you talk
+back; the grilling session keeps branching on your Mac.
+
+```bash
+# for a session on this machine — no port, no token, no tunnel
+node board.mjs mcp --state ~/.claude/grill-board/<board>/state.json
+```
+
+```bash
+# for one that has to reach the board over a network
+node board.mjs serve --state <path> --token     # POST /mcp, prints the token
+```
+
+Five tools: `list_questions`, `read_question`, `answer`, `ask_better`,
+`board_status`. What makes it work is that **`answer` takes free text** — you
+say *"the first one, but only if we log the discards"* and that sentence is
+recorded verbatim. Nothing tries to match it to an option key; the grilling
+session reads it exactly as it reads a typed note.
+
+Each card carries a `spoken` line written for the ear — no file paths, no
+tables. `read_question` returns the full detail for when you ask for it, so the
+narrator never has to improvise from a code block.
+
+**`--token` is not optional once the board leaves your machine.** Without it the
+board is readable and *writable* by anyone who can reach the URL, which is a
+problem the moment you tunnel it. It's accepted as `?t=` or a bearer header.
+
+The seam is the state file, not HTTP — so an answer given by voice wakes the
+grilling session exactly as a keystroke does, and you can switch between phone
+and keyboard mid-board without telling either one.
+
 ## How it works
 
 A ~600-line zero-dependency Node server and a single HTML page.
