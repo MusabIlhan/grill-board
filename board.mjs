@@ -502,13 +502,30 @@ async function serve() {
 
       // MCP, for a client that talks to the board instead of looking at it.
       if (url.pathname === '/mcp') {
+        // Streamable HTTP lets a client open a channel for server-initiated
+        // messages. This server never sends any, but answering 405 makes some
+        // clients treat the connection as failed — so hold an idle stream open.
+        if (req.method === 'GET') {
+          res.writeHead(200, { ...CORS, 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
+          res.write(': open\n\n');
+          const beat = setInterval(() => res.write(': ping\n\n'), 25000);
+          req.on('close', () => clearInterval(beat));
+          return;
+        }
         if (req.method !== 'POST') { res.writeHead(405, CORS); return res.end('POST JSON-RPC here'); }
         const body = await readBody(req);
         const batch = Array.isArray(body);
         const replies = (batch ? body : [body]).map((m) => handleRpc(p, m)).filter(Boolean);
         if (!replies.length) { res.writeHead(202, CORS); return res.end(); }
+        const payload = JSON.stringify(batch ? replies : replies[0]);
+        // Clients advertise which framing they can read. Several accept ONLY
+        // event-stream on POST, and reply with JSON to those and they stall.
+        if (String(req.headers.accept || '').includes('text/event-stream')) {
+          res.writeHead(200, { ...CORS, 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+          return res.end(`event: message\ndata: ${payload}\n\n`);
+        }
         res.writeHead(200, { ...CORS, 'content-type': 'application/json' });
-        return res.end(JSON.stringify(batch ? replies : replies[0]));
+        return res.end(payload);
       }
 
       if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
