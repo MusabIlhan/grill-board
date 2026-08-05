@@ -834,6 +834,7 @@
     }
     paintFocus();
     repaintOptions(q.id);
+    reveal(cursorEl(q));
   }
 
   // Drop a selection that only exists because the cursor passed over it.
@@ -853,6 +854,7 @@
     focusLevel = 'card';
     paintFocus();
     if (q) repaintOptions(q.id);
+    reveal(focusedCardEl());   // back to the whole card, so show the whole card
   }
 
   // Right on the note row is the step that starts typing.
@@ -861,7 +863,7 @@
     const card = focusedCardEl();
     if (!q || !card || cursorIdx(q) !== noteIdx(q)) return;
     const ta = card.querySelector('[data-own]');
-    if (ta) { ta.focus(); autosize(ta); }
+    if (ta) { ta.focus(); autosize(ta); reveal(card.querySelector('.own')); }
   }
 
   function moveChoice(delta) {
@@ -882,6 +884,7 @@
       if (btn) { btn.click(); provisional.add(q.id); }
     }
     repaintOptions(q.id);
+    reveal(cursorEl(q));
   }
 
   // ---- scroll anchoring -----------------------------------------------
@@ -1391,13 +1394,31 @@
     }
   }
 
-  function reveal(el) {
+  // Bring anything the cursor lands on fully into view — a card or a single
+  // choice. Instant, never smooth: smooth scrolling silently does nothing in a
+  // hidden tab, which is where this page often lives.
+  function reveal(el, pad = 12) {
+    if (!el) return;
     const r = el.getBoundingClientRect();
-    const top = 110; // clear the sticky header
-    const bottom = viewportHeight() - 20;
-    if (r.top < top) window.scrollBy(0, r.top - top);
-    else if (r.top > bottom) window.scrollBy(0, r.top - top);
-    else if (r.bottom > bottom && r.height < bottom - top) window.scrollBy(0, r.bottom - bottom);
+    const top = 110;                        // below the sticky header
+    const bottom = viewportHeight() - 72;   // above the floating buttons
+    if (r.height > bottom - top) {
+      // Taller than the space available, so "fully in view" is impossible.
+      // Settle for its top sitting under the header.
+      if (r.top < top || r.top > bottom) window.scrollBy(0, r.top - top);
+      return;
+    }
+    if (r.top < top) window.scrollBy(0, r.top - top - pad);
+    else if (r.bottom > bottom) window.scrollBy(0, r.bottom - bottom + pad);
+  }
+
+  // Whatever the horizontal cursor is currently on: a choice, or the note field.
+  function cursorEl(q) {
+    const card = feed.querySelector(`[data-qid="${q.id}"]`);
+    if (!card) return null;
+    const i = cursorIdx(q);
+    if (i < 0) return null;
+    return i === noteIdx(q) ? card.querySelector('.own') : card.querySelectorAll('[data-pick]')[i];
   }
 
   function setFocus(qid, { scroll = true } = {}) {
@@ -1409,6 +1430,14 @@
     paintFocus();
     const el = feed.querySelector(`[data-qid="${qid}"]`);
     if (el && scroll) reveal(el);
+  }
+
+  // Jumping to a named card (n, home, end) is a card-level command, so it must
+  // land at the card level — even when the target IS the current card, where
+  // setFocus's change-detection would otherwise leave you inside its choices.
+  function gotoCard(qid) {
+    if (focusLevel === 'option') exitOptions();
+    setFocus(qid);
   }
 
   function moveFocus(delta) {
@@ -1501,15 +1530,15 @@
     if (lower === 'a' || k === 'ArrowLeft') {
       stop(); if (focusLevel === 'option') exitOptions(); return;
     }
-    if (k === 'Home' || k === 'g') { stop(); const l = focusables(); if (l.length) setFocus(l[0].dataset.qid); return; }
-    if (k === 'End' || k === 'G') { stop(); const l = focusables(); if (l.length) setFocus(l[l.length - 1].dataset.qid); return; }
+    if (k === 'Home' || k === 'g') { stop(); const l = focusables(); if (l.length) gotoCard(l[0].dataset.qid); return; }
+    if (k === 'End' || k === 'G') { stop(); const l = focusables(); if (l.length) gotoCard(l[l.length - 1].dataset.qid); return; }
     if (lower === 'n') {
       stop();
       const l = focusables();
       const open = l.filter((el) => !el.classList.contains('done'));
       if (!open.length) return;
       const cur = l.findIndex((el) => el.dataset.qid === focusedQid);
-      setFocus((open.find((el) => l.indexOf(el) > cur) || open[0]).dataset.qid);
+      gotoCard((open.find((el) => l.indexOf(el) > cur) || open[0]).dataset.qid);
       return;
     }
 
