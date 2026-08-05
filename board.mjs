@@ -41,6 +41,46 @@ function getCurrent() {
   } catch { return null; }
 }
 
+// Several grills run at once here, so "newest wins" cannot be the only answer:
+// each serve registers itself, and dead ones are filtered out by pid on read.
+const BOARDS = join(homedir(), '.claude', 'grill-board', 'boards.json');
+
+function readRegistry() {
+  try { return JSON.parse(readFileSync(BOARDS, 'utf8')); } catch { return {}; }
+}
+
+function registerBoard(p, title, port) {
+  try {
+    mkdirSync(dirname(BOARDS), { recursive: true });
+    const all = {};
+    for (const [path, b] of Object.entries(readRegistry())) {
+      if (!existsSync(path) || !b.pid) continue;
+      try { process.kill(b.pid, 0); } catch { continue; } // its server is gone
+      all[path] = b;
+    }
+    all[p] = { title: title || 'Grill board', port, pid: process.pid, at: new Date().toISOString() };
+    writeFileSync(BOARDS, JSON.stringify(all, null, 2));
+  } catch { /* a registry failure must not stop a board */ }
+}
+
+function liveBoards() {
+  const out = {};
+  for (const [p, b] of Object.entries(readRegistry())) {
+    if (!existsSync(p) || !b.pid) continue;
+    try { process.kill(b.pid, 0); } catch { continue; }
+    out[p] = b;
+  }
+  // The registry only knows boards that registered themselves. One started
+  // before this existed — or by an older build — would be invisible, including
+  // the very board you are on, so fold the current pointer in regardless.
+  const cur = getCurrent();
+  if (cur && !out[cur]) {
+    const s = peek(cur);
+    if (s) out[cur] = { title: s.title, port: null, pid: null, at: s.createdAt };
+  }
+  return out;
+}
+
 // Viewer preferences (theme, palette) live OUTSIDE any single board. Each board
 // gets its own port, and localStorage is per-origin, so the browser alone would
 // forget the choice every time a new board starts.
@@ -330,8 +370,26 @@ const MCP_TOOLS = [
   },
   {
     name: 'board_status',
-    description: 'How many questions are open, answered and still queued.',
+    description: 'How many questions are open, answered and still queued on the board you are on.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'list_boards',
+    description:
+      'Every grill running right now. Several can be going at once. Call this when they mention a different subject ' +
+      'from the one you are on, ask what else is running, or say you are on the wrong board.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'use_board',
+    description:
+      'Switch to another running grill by name. Take the name from list_boards; a distinctive fragment is enough. ' +
+      'Confirm the switch out loud, because it changes which questions everything else acts on.',
+    inputSchema: {
+      type: 'object',
+      properties: { name: { type: 'string', description: 'board title, or part of it' } },
+      required: ['name'], additionalProperties: false,
+    },
   },
 ];
 
@@ -382,6 +440,24 @@ function callTool(p, name, a = {}) {
     return out.ok
       ? `Sent ${a.id} back to be re-asked (${a.kind}). It will reappear rewritten.`
       : `Could not send it back: ${out.error}`;
+  }
+  if (name === 'list_boards') {
+    const all = Object.entries(liveBoards());
+    if (!all.length) return 'No grills are running.';
+    return all.map(([path, b]) => {
+      const s = peek(path);
+      const open = s ? s.questions.filter((q) => q.status === 'open').length : 0;
+      return `"${b.title}" — ${open} open${path === p ? '   ← you are on this one' : ''}`;
+    }).join('\n');
+  }
+  if (name === 'use_board') {
+    const want = String(a.name || '').toLowerCase();
+    const hit = Object.entries(liveBoards()).find(([, b]) => b.title.toLowerCase().includes(want));
+    if (!hit) return `No running grill matches "${a.name}". Use list_boards to see what there is.`;
+    setCurrent(hit[0]);
+    const s = peek(hit[0]);
+    const open = s ? s.questions.filter((q) => q.status === 'open').length : 0;
+    return `Switched to "${hit[1].title}" — ${open} open. Everything from here acts on that board.`;
   }
   if (name === 'board_status') {
     const s = mcpRead(p);
@@ -459,6 +535,7 @@ async function findPort(host, preferred) {
 // mandatory the moment the board is tunnelled somewhere public, which is what
 // remote MCP needs — an open board is one a stranger can read AND answer.
 let TOKEN = null;
+let LOG = false;
 
 const CORS = {
   'access-control-allow-origin': '*',
@@ -470,7 +547,12 @@ function authOk(req, url) {
   if (!TOKEN) return true;
   const h = req.headers.authorization || '';
   if (h.startsWith('Bearer ') && h.slice(7) === TOKEN) return true;
-  return url.searchParams.get('t') === TOKEN;
+  if (url.searchParams.get('t') === TOKEN) return true;
+  // Also accept it as a path segment: /mcp/<token>. A connector UI that
+  // normalises or strips the query string would otherwise drop the credential
+  // and there would be no way to hand it one.
+  const seg = url.pathname.split('/').filter(Boolean);
+  return seg.length > 1 && seg[seg.length - 1] === TOKEN;
 }
 
 function json(res, code, body) {
@@ -507,14 +589,26 @@ function makeHandler(boardPath) {
   return async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     const p = boardPath();
+    if (LOG) process.stderr.write(`${new Date().toISOString().slice(11, 19)} ${req.method} ${url.pathname} ua=${(req.headers['user-agent'] || '-').slice(0, 40)} accept=${(req.headers.accept || '-').slice(0, 40)}\n`);
     if (req.method === 'OPTIONS') { res.writeHead(204, CORS); return res.end(); }
-    if (!authOk(req, url)) return json(res, 401, { ok: false, error: 'unauthorized' });
+
+    // This server has no OAuth. Answering 401 to the discovery probes tells a
+    // client the opposite — that auth exists and it should negotiate — and it
+    // then has nothing to negotiate with. 404 is the honest answer.
+    if (url.pathname.startsWith('/.well-known/')) { res.writeHead(404, CORS); return res.end('no oauth here'); }
+
+    if (!authOk(req, url)) {
+      // Name the scheme, so a client knows a bearer token is what's wanted
+      // rather than guessing at an authorization flow.
+      res.writeHead(401, { ...CORS, 'www-authenticate': 'Bearer realm="grill-board"', 'content-type': 'application/json' });
+      return res.end(JSON.stringify({ ok: false, error: 'unauthorized' }));
+    }
     // /mcp speaks for itself when nothing is live; every other route needs a board.
     if (!p && url.pathname !== '/mcp') return json(res, 503, { ok: false, error: 'no grill board is running' });
     try {
 
       // MCP, for a client that talks to the board instead of looking at it.
-      if (url.pathname === '/mcp') {
+      if (url.pathname === '/mcp' || url.pathname.startsWith('/mcp/')) {
         // Streamable HTTP lets a client open a channel for server-initiated
         // messages. This server never sends any, but answering 405 makes some
         // clients treat the connection as failed — so hold an idle stream open.
@@ -628,11 +722,12 @@ async function serve() {
     TOKEN = args.token ? cur.token : null;
   });
 
-  // Claim the voice gateway. The newest board is the one you talk to.
-  setCurrent(p);
-
   const host = args.host || '0.0.0.0';
   const port = await findPort(host, args.port);
+  // Claim the voice gateway — the newest board is the one you talk to — but
+  // register too, so the others stay reachable by name.
+  setCurrent(p);
+  registerBoard(p, args.title ? String(args.title) : load(p).title, port);
   const server = createServer(makeHandler(() => p));
 
   server.listen(port, host, () => {
@@ -831,6 +926,7 @@ async function cmdGateway() {
   }
   const host = args.host || '127.0.0.1';
   const port = await findPort(host, args.port || 7799);
+  LOG = true; // a gateway is long-lived and low-traffic; the log is how a connector failure gets diagnosed
   const server = createServer(makeHandler(getCurrent));
   server.listen(port, host, () => {
     const q = TOKEN ? `?t=${TOKEN}` : '';

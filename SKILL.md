@@ -198,7 +198,7 @@ thread ends when the next question would not change what gets built.
 |---|---|
 | `serve --state P [--port N] [--host H] [--title T] [--subtitle S] [--max-open N] [--token]` | start the board, print URLs (the subtitle is the title's tooltip — keep the title itself short and load-bearing) |
 | `mcp --state P` | MCP over stdio, so another session can read and answer this board. Also served at `POST /mcp` for a client that must reach it over a network |
-| `gateway [--port N] [--token]` | long-lived front door serving whichever board is current, for a tunnel + connector registered once. `serve` claims it automatically — nothing to do per board |
+| `gateway [--port N] [--token]` | long-lived front door serving whichever board is current, for a tunnel + connector registered once. `serve` claims it and registers itself automatically — nothing to do per board. With several grills running, the voice client can `list_boards` and `use_board` to switch |
 | `add --state P --file F` | append questions (JSON array; `-` for stdin) |
 | `new --state P` | unprocessed events as JSON, advances the cursor |
 | `watch --state P` | one stdout line per event — for `Monitor` |
