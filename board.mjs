@@ -101,8 +101,6 @@ function load(p, { create = false, title } = {}) {
   }
 }
 
-// Atomic-ish: write a sibling temp file then rename over the target, so a
-// reader never sees a half-written board.
 // Write a sibling temp file then rename over the target. rename(2) within a
 // directory is atomic, so a concurrent reader sees either the whole old board
 // or the whole new one — never a half-written file. (Writing straight to `p`
@@ -118,8 +116,10 @@ function save(p, s) {
   }
 }
 
-// Read-modify-write under a coarse retry, since the server and the CLI can both
-// touch the board. Single user, single machine — this is enough.
+// The ways of saying "I can't answer this yet". Each asks for a different thing
+// back, and the agent's response differs accordingly.
+const ASK_KINDS = ['simpler', 'implications', 'perspective'];
+
 // `serve` and `add` are deliberately issued together, and the agent posts while
 // the page is answering, so two writers overlapping is routine here rather than
 // exotic. Read-modify-write alone loses one of them silently — a title, an
@@ -323,38 +323,18 @@ async function serve() {
         return json(res, out.ok ? 200 : 404, out);
       }
 
-      if (req.method === 'POST' && url.pathname === '/api/skip') {
+      // One endpoint for every "I can't answer this yet" request. They differ
+      // only in what they ask for, so they share a shape rather than each
+      // getting a route of its own.
+      if (req.method === 'POST' && url.pathname === '/api/ask') {
         const body = await readBody(req);
+        const kind = String(body.kind || '');
+        if (!ASK_KINDS.includes(kind)) return json(res, 400, { ok: false, error: 'unknown kind' });
         const out = mutate(p, (cur) => {
           const q = cur.questions.find((x) => x.id === body.id);
           if (!q) return { ok: false, error: 'unknown question' };
-          q.status = 'skipped';
-          q.answer = { keys: [], text: body.text || null, at: new Date().toISOString(), skipped: true };
-          pushEvent(cur, { type: 'skip', id: q.id, thread: q.thread, title: q.title, text: body.text || null });
-          return { ok: true };
-        });
-        return json(res, out.ok ? 200 : 404, out);
-      }
-
-      if (req.method === 'POST' && url.pathname === '/api/pushback') {
-        const body = await readBody(req);
-        const out = mutate(p, (cur) => {
-          const q = cur.questions.find((x) => x.id === body.id);
-          if (!q) return { ok: false, error: 'unknown question' };
-          q.pushback = { text: String(body.text || ''), at: new Date().toISOString() };
-          pushEvent(cur, { type: 'pushback', id: q.id, thread: q.thread, title: q.title, text: q.pushback.text });
-          return { ok: true };
-        });
-        return json(res, out.ok ? 200 : 404, out);
-      }
-
-      if (req.method === 'POST' && url.pathname === '/api/simpler') {
-        const body = await readBody(req);
-        const out = mutate(p, (cur) => {
-          const q = cur.questions.find((x) => x.id === body.id);
-          if (!q) return { ok: false, error: 'unknown question' };
-          q.simpler = { at: new Date().toISOString() };
-          pushEvent(cur, { type: 'simpler', id: q.id, thread: q.thread, title: q.title });
+          q.ask = { kind, at: new Date().toISOString() };
+          pushEvent(cur, { type: 'ask', kind, id: q.id, thread: q.thread, title: q.title });
           return { ok: true };
         });
         return json(res, out.ok ? 200 : 404, out);
@@ -442,15 +422,20 @@ function describe(ev) {
     const note = ev.answer.text ? ` note: ${JSON.stringify(ev.answer.text.slice(0, 120))}` : '';
     return `[answer] ${ev.id} (${ev.thread}) picked ${picked}${note}`;
   }
-  if (ev.type === 'skip') return `[skip] ${ev.id} (${ev.thread})`;
-  if (ev.type === 'pushback') return `[pushback] ${ev.id} (${ev.thread}) ${JSON.stringify(String(ev.text).slice(0, 160))}`;
-  if (ev.type === 'simpler') return `[simpler] ${ev.id} (${ev.thread}) too complex — re-ask it plainly`;
+  if (ev.type === 'ask') {
+    const want = {
+      simpler: 'too dense — re-ask it plainly',
+      implications: 'wants what each choice would actually mean',
+      perspective: 'wants the angle needed to judge it',
+    }[ev.kind] || ev.kind;
+    return `[ask:${ev.kind}] ${ev.id} (${ev.thread}) ${want}`;
+  }
   if (ev.type === 'message') return `[message] ${JSON.stringify(String(ev.text).slice(0, 160))}`;
   return `[${ev.type}] ${ev.id || ''}`;
 }
 
 function counts(s) {
-  const by = { open: 0, queued: 0, answered: 0, skipped: 0, retired: 0 };
+  const by = { open: 0, queued: 0, answered: 0, retired: 0 };
   for (const q of s.questions) by[q.status] = (by[q.status] || 0) + 1;
   return by;
 }
@@ -484,7 +469,7 @@ async function cmdWatch() {
     }
     const c = counts(s);
     if (c.open === 0 && c.queued === 0 && s.questions.length && !announcedDrain) {
-      process.stdout.write(`[drained] board empty — ${c.answered} answered, ${c.skipped} skipped\n`);
+      process.stdout.write(`[drained] board empty — ${c.answered} answered\n`);
       announcedDrain = true;
     }
     await sleep(1000);
@@ -523,7 +508,7 @@ function cmdStatus() {
   const threads = [...new Set(s.questions.map((q) => q.thread))];
   process.stdout.write(
     `${s.title}\n` +
-    `  open ${c.open} · queued ${c.queued} · answered ${c.answered} · skipped ${c.skipped} · retired ${c.retired}\n` +
+    `  open ${c.open} · queued ${c.queued} · answered ${c.answered} · retired ${c.retired}\n` +
     `  threads: ${threads.join(', ')}\n` +
     `  unread events: ${s.events.filter((e) => e.n > (s.cursor || 0)).length}\n`
   );
@@ -548,15 +533,12 @@ function cmdExport() {
           .join(' + ');
         if (picked) lines.push(`**Answer:** ${picked}`);
         if (q.answer.text) lines.push(`**In their words:** ${q.answer.text}`);
-      } else if (q.status === 'skipped') {
-        lines.push(`**Skipped** — deferred to Claude's recommendation${q.recommendation ? `: ${q.recommendation}` : ''}`);
       } else if (q.status === 'retired') {
         lines.push(`**Retired** — ${q.retiredReason}`);
       } else {
         lines.push('**Unanswered**');
       }
-      if (q.pushback) lines.push(`**Pushback:** ${q.pushback.text}`);
-      if (q.simpler) lines.push('**Asked for simpler.**');
+      if (q.ask) lines.push(`**Asked for ${q.ask.kind}.**`);
       lines.push('');
     }
   }

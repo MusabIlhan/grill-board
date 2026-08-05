@@ -57,14 +57,19 @@ cards  ──→──  that card's choices  ──→──  typing your own
 | <kbd>space</kbd> | Take the highlighted choice — from the card level, Claude's pick |
 | <kbd>⌘↵</kbd> | Send — the same key on a choice as in the text |
 | <kbd>↵</kbd> | Reopen an answered card |
-| <kbd>C</kbd> <kbd>X</kbd> <kbd>T</kbd> <kbd>R</kbd> <kbd>E</kbd> | Write your own · you decide · ask me simpler · push back · Claude's take |
+| <kbd>C</kbd> <kbd>E</kbd> | Write your own · show Claude's take |
+| <kbd>T</kbd> <kbd>I</kbd> <kbd>V</kbd> | Ask simpler · implications · perspective |
 | <kbd>M</kbd> <kbd>L</kbd> <kbd>P</kbd> | Tell Claude something · light/dark · palette |
 
-Three ways to answer without answering, and they mean different things:
-**You decide** defers to Claude's pick. **Ask me simpler** says the question was
-too dense to answer — it gets re-asked in plain words, or split, without losing
-the detail that made it decidable. **Push back** says the question itself was
-*wrong*, and it gets retired and re-asked rather than defended.
+Three ways to say **"I can't answer this yet"**, and they ask for different
+things back. **Ask simpler** — too dense as written, so it gets re-said plainly
+or split in two. **Implications** — you can read the options but not their
+consequences, so each one comes back with what it commits you to. **Perspective**
+— you lack the vantage point, so the question returns with what a decision like
+this actually turns on.
+
+None of them answers for you, and none drops the detail that made the question
+decidable. The card is retired and re-asked.
 
 A card you're merely passing over never shows a highlighted choice — a highlight
 you didn't put there reads as a decision already made for you. Choices you move

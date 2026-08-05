@@ -97,10 +97,16 @@ For each event:
 | event | what you owe them |
 |---|---|
 | `answer` | Branch: 0–3 follow-ups **in that thread** if real ambiguity remains. Then re-read every *other* open card — retire any the answer just made moot, and revise any it contradicts. |
-| `skip` | They deferred to your recommendation. Record it as decided-by-you and move that thread on. |
-| `pushback` | The question was wrong. Retire it and re-ask it properly — do not defend it. |
-| `simpler` | The question was unanswerable as written — too dense, too much jargon, too many things at once. Retire it and ask the **same decision** again in plain words, splitting it if it was really two questions. Do not just shorten it, and do not drop the detail that made it decidable. |
+| `ask` | They could not answer it **as written**. Retire the card and re-ask the *same decision*, fixed per `kind` below. Never answer it for them, and never drop the detail that made it decidable. |
 | `message` | Steering. Obeys immediately, even if it means retiring a whole thread. |
+
+An `ask` carries a `kind`, and the three want genuinely different things:
+
+| `kind` | What the replacement card must do |
+|---|---|
+| `simpler` | Too dense to answer. Say it in plain words — no jargon, no nested clauses — and **split it** if it was really two decisions wearing one title. Shortening it is not the fix; being answerable is. |
+| `implications` | They can read the options but not their consequences. Spell out, per option, what it commits them to: what it costs, what it forecloses, what breaks later, what has to be built. Then ask the same question again with that in the context. |
+| `perspective` | They lack the vantage point to judge. Supply what a decision like this actually turns on — who it hurts when it's wrong, how it has gone elsewhere, which of their own constraints bears on it — and re-ask. Give the frame, not the answer. |
 
 Then set the liveness note, post new cards, and **end your turn again**:
 

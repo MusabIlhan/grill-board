@@ -411,8 +411,8 @@
   .done-row:hover .q { color: var(--ink-2); }
 
   /* Body text, so it takes the readable ink — the amber does the signalling
-     from the frame. Gruvbox's light yellow only reaches 3.3:1 as text. */
-  .pushback-note {
+     from the frame. A palette accent is often too light to read as text. */
+  .ask-note {
     margin-top: 10px; font-size: 13px; color: var(--ink-2);
     background: color-mix(in srgb, var(--warn) 14%, transparent);
     border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
@@ -538,10 +538,12 @@
       <dt><kbd>⌘↵</kbd></dt><dd>Send — the same key on a choice as in the text</dd>
       <dt><kbd>↵</kbd></dt><dd>Reopen an answered card</dd>
       <dt><kbd>C</kbd></dt><dd>Jump straight to writing your own (<kbd>esc</kbd> to leave)</dd>
-      <dt><kbd>X</kbd></dt><dd>You decide — defer to Claude's pick</dd>
-      <dt><kbd>T</kbd></dt><dd>Ask me simpler — this one is too dense to answer</dd>
-      <dt><kbd>R</kbd></dt><dd>Push back: tell Claude the question is wrong</dd>
       <dt><kbd>E</kbd></dt><dd>Show or hide Claude's take</dd>
+
+      <div class="sect">Can't answer it yet</div>
+      <dt><kbd>T</kbd></dt><dd>Ask simpler — too dense to answer as written</dd>
+      <dt><kbd>I</kbd></dt><dd>Implications — what would each choice actually mean?</dd>
+      <dt><kbd>V</kbd></dt><dd>Perspective — what do I need to know to judge this?</dd>
 
       <div class="sect">Board</div>
       <dt><kbd>M</kbd></dt><dd>Tell Claude something</dd>
@@ -972,7 +974,7 @@
     // Retired cards stay visible for the audit trail but can never be answered,
     // so counting them would leave the meter permanently short of full.
     const countable = live.filter((q) => q.status !== 'retired');
-    const answered = countable.filter((q) => q.status === 'answered' || q.status === 'skipped').length;
+    const answered = countable.filter((q) => q.status === 'answered').length;
     const open = questions.filter((q) => q.status === 'open').length;
     const queued = questions.filter((q) => q.status === 'queued').length;
 
@@ -1045,14 +1047,10 @@
         <div class="a"><em>Retired — ${esc(q.retiredReason || '')}</em></div></div></div></div>`;
     }
 
-    if ((q.status === 'answered' || q.status === 'skipped') && !expanded.has(q.id)) {
-      let ans;
-      if (q.status === 'skipped') ans = '<em>Skipped — your call, Claude</em>';
-      else {
-        const picked = (q.answer?.keys || []).map((k) => esc(optLabel(q, k))).join(' + ');
-        const txt = q.answer?.text ? `<em>${picked ? ' — ' : ''}“${esc(q.answer.text)}”</em>` : '';
-        ans = (picked || '') + txt || '<em>answered</em>';
-      }
+    if (q.status === 'answered' && !expanded.has(q.id)) {
+      const picked = (q.answer?.keys || []).map((k) => esc(optLabel(q, k))).join(' + ');
+      const txt = q.answer?.text ? `<em>${picked ? ' — ' : ''}“${esc(q.answer.text)}”</em>` : '';
+      const ans = (picked || '') + txt || '<em>answered</em>';
       return `<div class="card done ${isChild ? 'child' : ''}" data-open="${q.id}" data-qid="${q.id}">
         <div class="done-row"><span class="tick">✓</span><div>
           <div class="q">${esc(q.title)}</div><div class="a">${ans}</div>
@@ -1082,8 +1080,7 @@
       </div>
       <h3 class="q-title">${esc(q.title)}</h3>
       ${q.context ? `<div class="prose">${md(q.context)}</div>` : ''}
-      ${q.pushback ? `<div class="pushback-note">You pushed back: “${esc(q.pushback.text)}” — Claude is revising.</div>` : ''}
-      ${q.simpler ? '<div class="pushback-note">You asked for this one simpler — Claude is rewriting it.</div>' : ''}
+      ${q.ask && ASKS[q.ask.kind] ? `<div class="ask-note">${esc(ASKS[q.ask.kind].said)} — Claude is rewriting it.</div>` : ''}
       ${q.recommendation ? `<details class="take" data-take="${q.id}"><summary>Claude's take</summary><div class="prose">${md(q.recommendation)}</div></details>` : ''}
       ${opts ? `<div class="options">${opts}</div>` : ''}
       <div class="own ${ci === q.options.length ? 'cursor' : ''}">
@@ -1091,9 +1088,9 @@
       </div>
       <div class="actions">
         <button class="send" data-send="${q.id}" ${picked.size || draft.trim() ? '' : 'disabled'}>Send</button>
-        <button class="link" data-skip="${q.id}">You decide</button>
-        <button class="link" data-simpler="${q.id}">Ask me simpler</button>
-        <button class="link" data-push="${q.id}">Push back</button>
+        <button class="link" data-ask="${q.id}" data-kind="simpler">Ask simpler</button>
+        <button class="link" data-ask="${q.id}" data-kind="implications">Implications</button>
+        <button class="link" data-ask="${q.id}" data-kind="perspective">Perspective</button>
         <span class="hint">${q.options.length ? '↑↓ move · → into choices · ⌘↵ send · ? keys' : '↑↓ move · → to write · ⌘↵ send · ? keys'}</span>
       </div>
     </div></div>`;
@@ -1188,14 +1185,12 @@
     // Keep focus in the textarea through the whole press. Without this the
     // textarea blurs on mousedown, and any resulting reflow can move the button
     // before mouseup — so the click is swallowed and you have to press twice.
-    feed.querySelectorAll('[data-send],[data-skip],[data-push],[data-simpler]').forEach((b) => {
+    feed.querySelectorAll('[data-send],[data-ask]').forEach((b) => {
       b.onmousedown = (e) => e.preventDefault();
     });
 
     feed.querySelectorAll('[data-send]').forEach((b) => { b.onclick = () => send(b.dataset.send); });
-    feed.querySelectorAll('[data-skip]').forEach((b) => { b.onclick = () => skip(b.dataset.skip); });
-    feed.querySelectorAll('[data-push]').forEach((b) => { b.onclick = () => pushback(b.dataset.push); });
-    feed.querySelectorAll('[data-simpler]').forEach((b) => { b.onclick = () => simpler(b.dataset.simpler); });
+    feed.querySelectorAll('[data-ask]').forEach((b) => { b.onclick = () => ask(b.dataset.ask, b.dataset.kind); });
     feed.querySelectorAll('[data-open]').forEach((c) => {
       c.onclick = () => { expanded.add(c.dataset.open); render(); };
     });
@@ -1228,28 +1223,20 @@
     } finally { inflight.delete(qid); }
   }
 
-  async function skip(qid) {
-    const q = questions.find((x) => x.id === qid);
-    if (q) { q.status = 'skipped'; q.answer = { keys: [], text: null, skipped: true }; }
-    expanded.delete(qid);
-    render();
-    try { await post('/api/skip', { id: qid }); lastRev = null; } catch { setOffline(true); }
-  }
+  // The three ways of saying "I can't answer this yet". None of them is an
+  // answer: each asks the question to come back better.
+  const ASKS = {
+    simpler: { label: 'Ask simpler', said: 'You asked for this one simpler' },
+    implications: { label: 'Implications', said: 'You asked what each choice would mean' },
+    perspective: { label: 'Perspective', said: 'You asked for the angle to judge this by' },
+  };
 
-  async function simpler(qid) {
+  async function ask(qid, kind) {
+    if (!ASKS[kind]) return;
     const q = questions.find((x) => x.id === qid);
-    if (q) q.simpler = { at: null };
+    if (q) q.ask = { kind, at: null };
     render();
-    try { await post('/api/simpler', { id: qid }); lastRev = null; } catch { setOffline(true); }
-  }
-
-  async function pushback(qid) {
-    const q = questions.find((x) => x.id === qid);
-    const text = prompt(`What's wrong with this question?\n\n“${q ? q.title : ''}”`);
-    if (!text || !text.trim()) return;
-    if (q) q.pushback = { text: text.trim() };
-    render();
-    try { await post('/api/pushback', { id: qid, text: text.trim() }); lastRev = null; } catch { setOffline(true); }
+    try { await post('/api/ask', { id: qid, kind }); lastRev = null; } catch { setOffline(true); }
   }
 
   // ------------------------------------------------------------ theme
@@ -1597,9 +1584,9 @@
       repaintOptions(qid);
       return;
     }
-    if (lower === 'x' && !answered) { stop(); skip(qid); return; }
-    if (lower === 't' && !answered) { stop(); simpler(qid); return; }
-    if (lower === 'r' && !answered) { stop(); pushback(qid); return; }
+    if (lower === 't' && !answered) { stop(); ask(qid, 'simpler'); return; }
+    if (lower === 'i' && !answered) { stop(); ask(qid, 'implications'); return; }
+    if (lower === 'v' && !answered) { stop(); ask(qid, 'perspective'); return; }
     if (lower === 'e') {
       const d = card.querySelector('[data-take]');
       if (d) { stop(); d.open = !d.open; }
