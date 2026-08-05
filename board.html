@@ -1,0 +1,1464 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Grill board</title>
+<script>
+  // Runs before first paint so the page never flashes the wrong theme.
+  // Default is Nord dark for everyone; the picker in the header overrides it,
+  // and that choice is stored per viewer (locally here, durably on the server).
+  (() => {
+    let t = null, p = null;
+    try { t = localStorage.getItem('gb.theme'); p = localStorage.getItem('gb.palette'); } catch {}
+    document.documentElement.dataset.theme = (t === 'light' || t === 'dark') ? t : 'dark';
+    // An unknown name simply falls through to the :root fallback pair.
+    document.documentElement.dataset.palette = p || 'nord';
+  })();
+</script>
+<style>
+  /* --------------------------------------------------------- palettes */
+  /* Eight established palettes, each with its own published light and dark
+     variants. Generated and contrast-audited together: all 16 combinations
+     clear WCAG AA on every text pair this board renders, and 3:1 on every
+     glyph. Only two values per palette are invented — the pill behind accent
+     text, and the text colour on an accent fill. Where an original missed the
+     floor it was deepened in place (never toward the neutral ink, which would
+     desaturate it away from the palette's identity).
+     Choose one from the header; the choice persists per board. */
+  :root { --radius: 14px; }
+
+  /* Fallback pair = the default, Nord. Only reached if data-palette is missing
+     or unrecognised; the named blocks below outrank it on specificity. */
+  :root {
+    color-scheme: light;
+    --bg: #e5e9f0; --panel: #eceff4; --panel-2: #d8dee9;
+    --ink: #2e3440; --ink-2: #3b4252; --ink-3: #4c566a;
+    --line: #d3dae4; --line-2: #c2cad6;
+    --accent: #496586; --accent-soft: #dce1e9; --on-accent: #eceff4;
+    --good: #7c906a; --warn: #9b865c; --danger: #a05159;
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px -16px rgba(0,0,0,.35);
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #2e3440; --panel: #3b4252; --panel-2: #434c5e;
+    --ink: #eceff4; --ink-2: #d8dee9; --ink-3: #b3bccc;
+    --line: #4c566a; --line-2: #5b6679;
+    --accent: #8dc3d2; --accent-soft: #404a5a; --on-accent: #3b4252;
+    --good: #a3be8c; --warn: #ebcb8b; --danger: #d9a0a6;
+    --shadow: 0 1px 2px rgba(0,0,0,.25), 0 8px 24px -16px rgba(0,0,0,.7);
+  }
+  :root[data-palette="gruvbox"][data-theme="light"] {
+    color-scheme: light;
+    --bg: #f2e5bc; --panel: #fbf1c7; --panel-2: #ebdbb2;
+    --ink: #3c3836; --ink-2: #504945; --ink-3: #665c54;
+    --line: #e3d4ac; --line-2: #d5c4a1;
+    --accent: #af3a03; --accent-soft: #f2dbaf; --on-accent: #fbf1c7;
+    --good: #427b58; --warn: #b57614; --danger: #9d0006;
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px -16px rgba(0,0,0,.35);
+  }
+  :root[data-palette="gruvbox"][data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #282828; --panel: #32302f; --panel-2: #3c3836;
+    --ink: #ebdbb2; --ink-2: #d5c4a1; --ink-3: #bdae93;
+    --line: #504945; --line-2: #665c54;
+    --accent: #fe831e; --accent-soft: #46382d; --on-accent: #32302f;
+    --good: #b8bb26; --warn: #fabd2f; --danger: #fc6a59;
+    --shadow: 0 1px 2px rgba(0,0,0,.25), 0 8px 24px -16px rgba(0,0,0,.7);
+  }
+  :root[data-palette="catppuccin"][data-theme="light"] {
+    color-scheme: light;
+    --bg: #e6e9ef; --panel: #eff1f5; --panel-2: #dce0e8;
+    --ink: #4c4f69; --ink-2: #5c5f77; --ink-3: #5f627a;
+    --line: #ccd0da; --line-2: #bcc0cc;
+    --accent: #8036e1; --accent-soft: #e4def3; --on-accent: #eff1f5;
+    --good: #3f9d2a; --warn: #c07a19; --danger: #ce0f38;
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px -16px rgba(0,0,0,.35);
+  }
+  :root[data-palette="catppuccin"][data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #181825; --panel: #1e1e2e; --panel-2: #313244;
+    --ink: #cdd6f4; --ink-2: #bac2de; --ink-3: #a6adc8;
+    --line: #45475a; --line-2: #585b70;
+    --accent: #cba6f7; --accent-soft: #483f5e; --on-accent: #1e1e2e;
+    --good: #a6e3a1; --warn: #f9e2af; --danger: #f38ba8;
+    --shadow: 0 1px 2px rgba(0,0,0,.25), 0 8px 24px -16px rgba(0,0,0,.7);
+  }
+  :root[data-palette="nord"][data-theme="light"] {
+    color-scheme: light;
+    --bg: #e5e9f0; --panel: #eceff4; --panel-2: #d8dee9;
+    --ink: #2e3440; --ink-2: #3b4252; --ink-3: #4c566a;
+    --line: #d3dae4; --line-2: #c2cad6;
+    --accent: #496586; --accent-soft: #dce1e9; --on-accent: #eceff4;
+    --good: #7c906a; --warn: #9b865c; --danger: #a05159;
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px -16px rgba(0,0,0,.35);
+  }
+  :root[data-palette="nord"][data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #2e3440; --panel: #3b4252; --panel-2: #434c5e;
+    --ink: #eceff4; --ink-2: #d8dee9; --ink-3: #b3bccc;
+    --line: #4c566a; --line-2: #5b6679;
+    --accent: #8dc3d2; --accent-soft: #404a5a; --on-accent: #3b4252;
+    --good: #a3be8c; --warn: #ebcb8b; --danger: #d9a0a6;
+    --shadow: 0 1px 2px rgba(0,0,0,.25), 0 8px 24px -16px rgba(0,0,0,.7);
+  }
+  :root[data-palette="solarized"][data-theme="light"] {
+    color-scheme: light;
+    --bg: #eee8d5; --panel: #fdf6e3; --panel-2: #e8e1ce;
+    --ink: #073642; --ink-2: #506870; --ink-3: #4b6871;
+    --line: #ded8c4; --line-2: #ccc6b0;
+    --accent: #b34213; --accent-soft: #f6e4ce; --on-accent: #fdf6e3;
+    --good: #829600; --warn: #b18600; --danger: #c22c29;
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px -16px rgba(0,0,0,.35);
+  }
+  :root[data-palette="solarized"][data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #002b36; --panel: #073642; --panel-2: #01313d;
+    --ink: #93a1a1; --ink-2: #8c9b9c; --ink-3: #8c9b9c;
+    --line: #0f4c5a; --line-2: #1a5f6f;
+    --accent: #e09373; --accent-soft: #1d3f47; --on-accent: #073642;
+    --good: #859900; --warn: #b58900; --danger: #e87876;
+    --shadow: 0 1px 2px rgba(0,0,0,.25), 0 8px 24px -16px rgba(0,0,0,.7);
+  }
+  :root[data-palette="rosepine"][data-theme="light"] {
+    color-scheme: light;
+    --bg: #f2e9e1; --panel: #fffaf3; --panel-2: #f4ede8;
+    --ink: #575279; --ink-2: #6d688a; --ink-3: #6a6586;
+    --line: #dfdad9; --line-2: #cecacd;
+    --accent: #975366; --accent-soft: #f3e6e2; --on-accent: #fffaf3;
+    --good: #286983; --warn: #c5842c; --danger: #975366;
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px -16px rgba(0,0,0,.35);
+  }
+  :root[data-palette="rosepine"][data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #232136; --panel: #2a273f; --panel-2: #393552;
+    --ink: #e0def4; --ink-2: #c5c1d8; --ink-3: #a29eba;
+    --line: #44415a; --line-2: #56526e;
+    --accent: #ea9a97; --accent-soft: #4d3c4f; --on-accent: #2a273f;
+    --good: #9ccfd8; --warn: #f6c177; --danger: #eb6f92;
+    --shadow: 0 1px 2px rgba(0,0,0,.25), 0 8px 24px -16px rgba(0,0,0,.7);
+  }
+  :root[data-palette="everforest"][data-theme="light"] {
+    color-scheme: light;
+    --bg: #efebd4; --panel: #fdf6e3; --panel-2: #f4f0d9;
+    --ink: #5c6a72; --ink-2: #616f77; --ink-3: #5e6c73;
+    --line: #dcd7bd; --line-2: #d0caae;
+    --accent: #9d5018; --accent-soft: #f1e2cb; --on-accent: #fdf6e3;
+    --good: #859701; --warn: #b78300; --danger: #b83f3d;
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px -16px rgba(0,0,0,.35);
+  }
+  :root[data-palette="everforest"][data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #2d353b; --panel: #343f44; --panel-2: #3d484d;
+    --ink: #d3c6aa; --ink-2: #c2b296; --ink-3: #b3b5a4;
+    --line: #475258; --line-2: #4f585e;
+    --accent: #e9a486; --accent-soft: #424749; --on-accent: #343f44;
+    --good: #a7c080; --warn: #dbbc7f; --danger: #ea9092;
+    --shadow: 0 1px 2px rgba(0,0,0,.25), 0 8px 24px -16px rgba(0,0,0,.7);
+  }
+  :root[data-palette="tokyonight"][data-theme="light"] {
+    color-scheme: light;
+    --bg: #d9dbe4; --panel: #e6e7ed; --panel-2: #cdd0dc;
+    --ink: #343b58; --ink-2: #4c505e; --ink-3: #4b5784;
+    --line: #c4c8d6; --line-2: #b0b5c6;
+    --accent: #225dac; --accent-soft: #d2d9e7; --on-accent: #e6e7ed;
+    --good: #587539; --warn: #8c6c3e; --danger: #b51f4b;
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px -16px rgba(0,0,0,.35);
+  }
+  :root[data-palette="tokyonight"][data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #1a1b26; --panel: #24283b; --panel-2: #292e42;
+    --ink: #c0caf5; --ink-2: #a9b1d6; --ink-3: #8c94b9;
+    --line: #3b4261; --line-2: #4a5178;
+    --accent: #7aa2f7; --accent-soft: #303955; --on-accent: #24283b;
+    --good: #9ece6a; --warn: #e0af68; --danger: #f7768e;
+    --shadow: 0 1px 2px rgba(0,0,0,.25), 0 8px 24px -16px rgba(0,0,0,.7);
+  }
+  :root[data-palette="github"][data-theme="light"] {
+    color-scheme: light;
+    --bg: #eaeef2; --panel: #ffffff; --panel-2: #f6f8fa;
+    --ink: #1f2328; --ink-2: #414a53; --ink-3: #59636e;
+    --line: #d1d9e0; --line-2: #b7bfc7;
+    --accent: #0967d6; --accent-soft: #e1edfa; --on-accent: #ffffff;
+    --good: #1a7f37; --warn: #9a6700; --danger: #cd232e;
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px -16px rgba(0,0,0,.35);
+  }
+  :root[data-palette="github"][data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0d1117; --panel: #161b22; --panel-2: #21262d;
+    --ink: #e6edf3; --ink-2: #c9d1d9; --ink-3: #8b949e;
+    --line: #30363d; --line-2: #444c56;
+    --accent: #58a6ff; --accent-soft: #253a53; --on-accent: #161b22;
+    --good: #3fb950; --warn: #d29922; --danger: #f85149;
+    --shadow: 0 1px 2px rgba(0,0,0,.25), 0 8px 24px -16px rgba(0,0,0,.7);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.6 ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    padding-bottom: 30vh;
+  }
+  code, pre, .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace; }
+
+  /* ---------------------------------------------------------- header */
+  header {
+    position: sticky; top: 0; z-index: 20;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: saturate(1.4) blur(12px);
+    border-bottom: 1px solid var(--line);
+  }
+  .head-inner {
+    max-width: 860px; margin: 0 auto; padding: 9px 20px;
+    display: flex; align-items: center; gap: 11px;
+  }
+  h1 {
+    font-size: 15px; font-weight: 650; margin: 0; letter-spacing: -.01em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    flex: 0 1 auto; min-width: 130px;
+  }
+  /* No subtitle element in the bar: at 860px wide it never got enough room to
+     say anything and it stole the title's. It lives on the title tooltip. */
+  /* Liveness only — the note text itself lives in the tooltip, not the bar. */
+  .live {
+    width: 6px; height: 6px; border-radius: 99px; background: var(--accent);
+    flex: none; animation: pulse 1.6s ease-in-out infinite;
+  }
+  .live[hidden] { display: none; }
+  .live.stale { background: var(--ink-3); animation: none; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
+  .meter { flex: 0 0 90px; height: 5px; border-radius: 99px; background: var(--line); overflow: hidden; }
+  .meter i { display: block; height: 100%; background: var(--good); width: 0%; }
+  .counts { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .spacer { flex: 1; min-width: 0; }
+  .ghost {
+    font: inherit; font-size: 12.5px; color: var(--ink-2);
+    background: none; border: 1px solid var(--line-2); border-radius: 99px;
+    padding: 4px 12px; cursor: pointer; white-space: nowrap; flex: none;
+  }
+  .ghost:hover { border-color: var(--ink-3); color: var(--ink); }
+  .ghost.icon { padding: 4px 7px; display: inline-grid; place-items: center; }
+  .ghost.icon svg { display: block; }
+  .offline { color: var(--danger); border-color: var(--danger); }
+
+  /* ------------------------------------------------------ palette picker */
+  .pop {
+    position: fixed; z-index: 40; top: 48px; right: 14px;
+    width: 292px; max-height: 74vh; overflow-y: auto;
+    background: var(--panel); border: 1px solid var(--line-2);
+    border-radius: 13px; box-shadow: var(--shadow); padding: 10px;
+  }
+  .pop[hidden] { display: none; }
+  .pop h4 {
+    margin: 10px 4px 7px; font-size: 10.5px; font-weight: 600;
+    letter-spacing: .09em; text-transform: uppercase; color: var(--ink-3);
+  }
+  .modes { display: flex; gap: 3px; background: var(--panel-2); border-radius: 9px; padding: 3px; }
+  .modes button {
+    flex: 1; font: inherit; font-size: 12.5px; padding: 5px 0; cursor: pointer;
+    border: none; border-radius: 7px; background: none; color: var(--ink-2);
+  }
+  .modes button.on { background: var(--panel); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.14); }
+  .pal {
+    display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+    padding: 7px 8px; margin-bottom: 1px; border: 1px solid transparent;
+    border-radius: 9px; background: none; cursor: pointer; font: inherit; color: var(--ink);
+  }
+  .pal:hover { background: var(--panel-2); }
+  .pal.on { border-color: var(--accent); background: var(--accent-soft); }
+  .sw { display: flex; flex: none; border-radius: 5px; overflow: hidden; border: 1px solid var(--line-2); }
+  .sw i { width: 13px; height: 24px; display: block; }
+  .pal .nm { display: block; font-size: 13px; font-weight: 600; line-height: 1.3; }
+  .pal .nt { display: block; font-size: 11.5px; color: var(--ink-3); line-height: 1.3; }
+  .pal.on .nt { color: var(--ink-2); }
+
+  /* ---------------------------------------------------------- layout */
+  main { max-width: 860px; margin: 0 auto; padding: 22px 20px 0; }
+  .thread-head {
+    display: flex; align-items: center; gap: 10px;
+    margin: 34px 0 12px; padding-bottom: 0;
+  }
+  .thread-head:first-child { margin-top: 6px; }
+  .thread-head h2 {
+    font-size: 12px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-3); margin: 0;
+  }
+  .thread-head .rule { flex: 1; height: 1px; background: var(--line); }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    margin: 0 0 12px;
+    overflow: hidden;
+  }
+  .card.child { margin-left: 22px; border-left: 3px solid var(--line-2); }
+  .card.child::before { content: ""; }
+  .card.is-new { border-color: var(--accent); }
+  /* The keyboard cursor. Outline rather than border so it never reflows the
+     card, and so it reads distinctly from the accent border on a new one. */
+  .card.focused { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .card.done { box-shadow: none; background: transparent; border-style: dashed; }
+  .card.retired { opacity: .5; }
+
+  .card-body { padding: 18px 20px 20px; }
+  .card-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+  .chip {
+    font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--ink-3); background: var(--panel-2); border: 1px solid var(--line);
+    padding: 2px 8px; border-radius: 99px;
+  }
+  .chip.new { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+  .qid { font-size: 11px; color: var(--ink-3); }
+  .q-title { font-size: 19px; line-height: 1.35; font-weight: 620; letter-spacing: -.012em; margin: 0 0 10px; }
+
+  .prose { color: var(--ink-2); font-size: 14.5px; }
+  .prose > *:first-child { margin-top: 0; }
+  .prose > *:last-child { margin-bottom: 0; }
+  .prose p { margin: 0 0 .8em; }
+  .prose ul, .prose ol { margin: 0 0 .8em; padding-left: 1.3em; }
+  .prose li { margin: .25em 0; }
+  .prose h3, .prose h4 { color: var(--ink); font-size: 14px; margin: 1.2em 0 .4em; font-weight: 620; }
+  .prose code { background: var(--panel-2); border: 1px solid var(--line); padding: 1px 5px; border-radius: 5px; font-size: .88em; }
+  .prose pre {
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 9px;
+    padding: 12px 14px; overflow-x: auto; margin: 0 0 .9em; font-size: 12.5px; line-height: 1.55;
+  }
+  .prose pre code { background: none; border: none; padding: 0; font-size: inherit; }
+  .prose blockquote { margin: 0 0 .8em; padding-left: 12px; border-left: 3px solid var(--line-2); color: var(--ink-3); }
+  .prose table { border-collapse: collapse; margin: 0 0 .9em; font-size: 13.5px; display: block; overflow-x: auto; }
+  .prose th, .prose td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; }
+  .prose th { background: var(--panel-2); font-weight: 600; color: var(--ink); }
+  .prose a { color: var(--accent); }
+  .prose hr { border: none; border-top: 1px solid var(--line); margin: 1.2em 0; }
+
+  details.take { margin: 14px 0 2px; }
+  details.take > summary {
+    cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12.5px; font-weight: 600; color: var(--accent);
+    background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+    padding: 4px 12px; border-radius: 99px; user-select: none;
+  }
+  details.take > summary::-webkit-details-marker { display: none; }
+  details.take > summary::after { content: "▾"; font-size: 10px; opacity: .7; }
+  details.take[open] > summary::after { content: "▴"; }
+  details.take .prose { margin-top: 10px; padding-left: 2px; }
+
+  /* ---------------------------------------------------------- options */
+  .options { margin: 16px 0 0; display: flex; flex-direction: column; gap: 7px; }
+  .opt {
+    display: flex; gap: 11px; align-items: flex-start; width: 100%; text-align: left;
+    background: var(--panel); border: 1px solid var(--line-2); border-radius: 10px;
+    padding: 11px 13px; cursor: pointer; font: inherit; color: var(--ink);
+  }
+  .opt:hover { border-color: var(--ink-3); background: var(--panel-2); }
+  .opt.sel { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+  /* Where ← → / a d currently sit. Only meaningful on the focused card, and
+     only visible when it isn't already the selection. */
+  .card.focused .opt.cursor:not(.sel) { border-color: var(--ink-3); background: var(--panel-2); }
+  .opt .key {
+    flex: none; width: 20px; height: 20px; border-radius: 6px; margin-top: 1px;
+    background: var(--panel-2); border: 1px solid var(--line-2);
+    font-size: 11px; font-weight: 700; color: var(--ink-3);
+    display: grid; place-items: center; text-transform: uppercase;
+  }
+  .opt.sel .key { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .opt .body { min-width: 0; }
+  .opt .label { display: block; font-weight: 550; line-height: 1.45; }
+  .opt .detail { display: block; color: var(--ink-3); font-size: 13px; margin-top: 3px; line-height: 1.5; }
+  .opt .star { margin-left: 6px; color: var(--warn); font-size: 12px; }
+
+  .own { margin-top: 11px; }
+  /* Height is driven by content (see autosize), never by focus. Growing on
+     focus and shrinking on blur moved the Send button out from under the
+     cursor between mousedown and mouseup, so the first click never landed. */
+  .own textarea {
+    width: 100%; resize: none; min-height: 42px; overflow: hidden;
+    font: inherit; font-size: 14px; color: var(--ink);
+    background: var(--panel-2); border: 1px dashed var(--line-2); border-radius: 10px;
+    padding: 10px 13px;
+  }
+  .own textarea:focus { outline: none; border-style: solid; border-color: var(--accent); background: var(--panel); }
+  /* The note field is the last stop on the horizontal axis; this is how it
+     looks when the cursor is parked there but you have stepped out with esc. */
+  .card.focused .own.cursor textarea:not(:focus) { border-style: solid; border-color: var(--ink-3); background: var(--panel); }
+  .own textarea::placeholder { color: var(--ink-3); }
+
+  .actions { display: flex; align-items: center; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  .send {
+    font: inherit; font-size: 14px; font-weight: 600;
+    background: var(--ink); color: var(--bg); border: 1px solid var(--ink);
+    padding: 8px 20px; border-radius: 9px; cursor: pointer;
+  }
+  .send:disabled { opacity: .35; cursor: not-allowed; }
+  .send:not(:disabled):hover { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .link { font: inherit; font-size: 13px; background: none; border: none; color: var(--ink-3); cursor: pointer; padding: 6px 4px; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line-2); }
+  .link:hover { color: var(--ink); }
+  .hint { font-size: 12px; color: var(--ink-3); margin-left: auto; }
+
+  /* ---------------------------------------------------------- answered */
+  .done-row { display: flex; gap: 11px; align-items: flex-start; padding: 12px 16px; cursor: pointer; }
+  .done-row .tick { flex: none; color: var(--good); font-size: 13px; margin-top: 2px; }
+  .done-row .q { font-size: 13.5px; color: var(--ink-3); line-height: 1.45; }
+  .done-row .a { font-size: 14px; color: var(--ink); font-weight: 550; margin-top: 2px; }
+  .done-row .a em { font-style: normal; color: var(--ink-2); font-weight: 400; }
+  .done-row:hover .q { color: var(--ink-2); }
+
+  /* Body text, so it takes the readable ink — the amber does the signalling
+     from the frame. Gruvbox's light yellow only reaches 3.3:1 as text. */
+  .pushback-note {
+    margin-top: 10px; font-size: 13px; color: var(--ink-2);
+    background: color-mix(in srgb, var(--warn) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+    border-radius: 9px; padding: 8px 12px;
+  }
+
+  /* --------------------------------------------------------- float bar */
+  /* Fixed, but constrained to the card column's width so the buttons sit over
+     the cards rather than off in the empty margin of a wide window. */
+  .floatbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+    max-width: 860px; margin: 0 auto; padding: 0 20px 20px;
+    display: flex; justify-content: flex-end; align-items: center; gap: 9px;
+    pointer-events: none;
+  }
+  .floatbar > * { pointer-events: auto; }
+  .float-btn {
+    font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+    border-radius: 99px; padding: 9px 17px; white-space: nowrap;
+    background: var(--panel); color: var(--ink); border: 1px solid var(--line-2);
+    box-shadow: 0 2px 5px rgba(0,0,0,.10), 0 10px 26px -12px rgba(0,0,0,.5);
+    backdrop-filter: saturate(1.4) blur(8px);
+  }
+  .float-btn:hover { border-color: var(--ink-3); }
+  .float-btn.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .float-btn.primary:hover { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .float-btn[hidden] { display: none; }
+
+  /* ---------------------------------------------------------- empty */
+  .empty { text-align: center; color: var(--ink-3); padding: 60px 20px; font-size: 14px; }
+  .empty .big { font-size: 15px; color: var(--ink-2); margin-bottom: 6px; }
+
+  /* ---------------------------------------------------------- msgbox */
+  dialog {
+    border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel);
+    color: var(--ink); padding: 0; max-width: 520px; width: calc(100% - 40px); box-shadow: var(--shadow);
+  }
+  dialog::backdrop { background: rgba(0,0,0,.35); }
+  .dlg { padding: 20px; }
+  .dlg h3 { margin: 0 0 4px; font-size: 15px; }
+  .dlg p { margin: 0 0 12px; font-size: 13px; color: var(--ink-3); }
+  .dlg textarea { width: 100%; min-height: 100px; font: inherit; font-size: 14px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--panel-2); color: var(--ink); resize: vertical; }
+  .dlg .actions { justify-content: flex-end; }
+
+  /* ------------------------------------------------------------ help */
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: 7px 14px; align-items: baseline; }
+  .keys dt { text-align: right; white-space: nowrap; }
+  .keys dd { margin: 0; font-size: 13.5px; color: var(--ink-2); }
+  .keys .sect {
+    grid-column: 1 / -1; margin: 10px 0 1px; font-size: 10.5px; font-weight: 600;
+    letter-spacing: .09em; text-transform: uppercase; color: var(--ink-3);
+  }
+  .keys .sect:first-child { margin-top: 0; }
+  kbd {
+    font: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px; background: var(--panel-2); color: var(--ink);
+    border: 1px solid var(--line-2); border-bottom-width: 2px;
+    border-radius: 5px; padding: 1px 6px; white-space: nowrap;
+  }
+
+  @media (max-width: 600px) {
+    main { padding: 16px 12px 0; }
+    .head-inner { padding: 9px 13px; gap: 9px; }
+    .floatbar { padding: 0 13px 14px; }
+    /* Not enough room for all of it — the counts carry the same information. */
+    .meter { display: none; }
+    #msg { font-size: 0; padding: 5px 11px; }
+    #msg::after { content: "Tell Claude"; font-size: 12.5px; }
+    .card.child { margin-left: 10px; }
+    .card-body { padding: 15px 15px 17px; }
+    .q-title { font-size: 17px; }
+    .hint { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="head-inner">
+    <h1 id="title">Grill board</h1>
+    <span class="live" id="live" hidden></span>
+    <div class="spacer"></div>
+    <div class="meter" title="answered"><i id="bar"></i></div>
+    <div class="counts" id="counts">—</div>
+    <button class="ghost icon" id="palette" title="Change palette" aria-label="Change palette"></button>
+    <button class="ghost icon" id="theme" title="Toggle light / dark" aria-label="Toggle light or dark theme"></button>
+    <button class="ghost" id="msg">Tell Claude something</button>
+    <button class="ghost offline" id="conn" hidden>offline</button>
+  </div>
+</header>
+
+<div class="pop" id="pop" hidden>
+  <div class="modes">
+    <button data-mode="light">Light</button>
+    <button data-mode="dark">Dark</button>
+  </div>
+  <h4>Palette</h4>
+  <div id="palList"></div>
+</div>
+
+<main id="feed"></main>
+
+<div class="floatbar">
+  <button class="float-btn primary" id="newPill" hidden></button>
+  <button class="float-btn" id="jump" hidden>Next open ↓</button>
+</div>
+
+<dialog id="helpDlg">
+  <form method="dialog" class="dlg">
+    <h3>Keyboard</h3>
+    <p>Everything on this board can be done without the mouse.</p>
+    <dl class="keys">
+      <div class="sect">Moving — up/down between cards, left/right between choices</div>
+      <dt><kbd>W</kbd> <kbd>S</kbd> / <kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Previous / next card</dd>
+      <dt><kbd>A</kbd> <kbd>D</kbd> / <kbd>←</kbd> <kbd>→</kbd></dt><dd>Move through the choices — past the last one is "write your own"</dd>
+      <dt><kbd>N</kbd></dt><dd>Jump to the next unanswered card</dd>
+      <dt><kbd>home</kbd> <kbd>end</kbd></dt><dd>First / last card</dd>
+
+      <div class="sect">Answering</div>
+      <dt><kbd>1</kbd>–<kbd>9</kbd></dt><dd>Pick a choice directly</dd>
+      <dt><kbd>space</kbd></dt><dd>Take the highlighted choice</dd>
+      <dt><kbd>↵</kbd></dt><dd>Send — or reopen an answered card</dd>
+      <dt><kbd>C</kbd></dt><dd>Jump straight to writing your own (<kbd>esc</kbd> to leave, <kbd>⌘↵</kbd> to send)</dd>
+      <dt><kbd>X</kbd></dt><dd>You decide — defer to Claude's pick</dd>
+      <dt><kbd>R</kbd></dt><dd>Push back: tell Claude the question is wrong</dd>
+      <dt><kbd>E</kbd></dt><dd>Show or hide Claude's take</dd>
+
+      <div class="sect">Board</div>
+      <dt><kbd>M</kbd></dt><dd>Tell Claude something</dd>
+      <dt><kbd>L</kbd></dt><dd>Light / dark</dd>
+      <dt><kbd>P</kbd></dt><dd>Palette</dd>
+      <dt><kbd>?</kbd></dt><dd>This list</dd>
+      <dt><kbd>esc</kbd></dt><dd>Close anything open</dd>
+    </dl>
+    <div class="actions"><button class="send" value="ok" type="submit">Got it</button></div>
+  </form>
+</dialog>
+
+<dialog id="msgDlg">
+  <form method="dialog" class="dlg">
+    <h3>Tell Claude something</h3>
+    <p>Anything not tied to one question — a correction, a constraint, "drop that whole thread".</p>
+    <textarea id="msgText" placeholder="…"></textarea>
+    <div class="actions">
+      <button class="link" value="cancel" type="submit">Cancel</button>
+      <button class="send" id="msgSend" value="send" type="submit">Send</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+(() => {
+  'use strict';
+
+  // ------------------------------------------------------------ markdown
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+
+  function inline(s) {
+    return esc(s)
+      .replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code>`)
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/(^|[\s(])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+      .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  }
+
+  function md(src) {
+    if (!src) return '';
+    const lines = String(src).replace(/\r\n?/g, '\n').split('\n');
+    const out = [];
+    let i = 0, para = [], list = null;
+
+    const flushPara = () => { if (para.length) { out.push(`<p>${inline(para.join(' '))}</p>`); para = []; } };
+    const flushList = () => { if (list) { out.push(`</${list}>`); list = null; } };
+
+    while (i < lines.length) {
+      const line = lines[i];
+
+      if (/^```/.test(line)) {
+        flushPara(); flushList();
+        const buf = [];
+        i++;
+        while (i < lines.length && !/^```/.test(lines[i])) buf.push(lines[i++]);
+        i++;
+        out.push(`<pre><code>${esc(buf.join('\n'))}</code></pre>`);
+        continue;
+      }
+
+      if (/^\s*\|.*\|\s*$/.test(line) && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1] || '')) {
+        flushPara(); flushList();
+        const cells = (r) => r.trim().replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+        const head = cells(line);
+        i += 2;
+        const rows = [];
+        while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) rows.push(cells(lines[i++]));
+        out.push('<table><thead><tr>' + head.map((h) => `<th>${inline(h)}</th>`).join('') + '</tr></thead><tbody>' +
+          rows.map((r) => '<tr>' + r.map((c) => `<td>${inline(c)}</td>`).join('') + '</tr>').join('') +
+          '</tbody></table>');
+        continue;
+      }
+
+      if (!line.trim()) { flushPara(); flushList(); i++; continue; }
+
+      if (/^#{1,6}\s/.test(line)) {
+        flushPara(); flushList();
+        const level = Math.min(line.match(/^#+/)[0].length + 2, 5);
+        out.push(`<h${level}>${inline(line.replace(/^#+\s*/, ''))}</h${level}>`);
+        i++; continue;
+      }
+
+      if (/^\s*(---|___|\*\*\*)\s*$/.test(line)) { flushPara(); flushList(); out.push('<hr>'); i++; continue; }
+
+      if (/^\s*>\s?/.test(line)) {
+        flushPara(); flushList();
+        const buf = [];
+        while (i < lines.length && /^\s*>\s?/.test(lines[i])) buf.push(lines[i++].replace(/^\s*>\s?/, ''));
+        out.push(`<blockquote>${md(buf.join('\n'))}</blockquote>`);
+        continue;
+      }
+
+      const bullet = line.match(/^\s*[-*+]\s+(.*)$/);
+      const numbered = line.match(/^\s*\d+[.)]\s+(.*)$/);
+      if (bullet || numbered) {
+        flushPara();
+        const want = bullet ? 'ul' : 'ol';
+        if (list !== want) { flushList(); out.push(`<${want}>`); list = want; }
+        out.push(`<li>${inline((bullet || numbered)[1])}</li>`);
+        i++; continue;
+      }
+
+      flushList();
+      para.push(line.trim());
+      i++;
+    }
+    flushPara(); flushList();
+    return out.join('\n');
+  }
+
+  // ------------------------------------------------------------ state
+  const feed = document.getElementById('feed');
+  let questions = [];
+  let lastRev = null;
+  let seenIds = new Set();
+  let firstLoad = true;
+  const sel = new Map();       // qid -> Set(keys)
+  const drafts = new Map();    // qid -> free text
+  const expanded = new Set();  // answered cards the user re-opened
+  const openTakes = new Set(); // qids with "Claude's take" expanded
+  const optCursor = new Map(); // qid -> index of the highlighted option
+  let inflight = new Set();
+  let lastHtml = '';
+
+  // Question ids restart at q1 on every board, so persistence has to be keyed
+  // by board or a new board picks up the last one's drafts on the same ids.
+  let boardId = null;
+  function bindStorage(id) {
+    if (boardId === id) return;
+    boardId = id;
+    try { seenIds = new Set(JSON.parse(localStorage.getItem(`gb.seen.${id}`) || '[]')); } catch { seenIds = new Set(); }
+    try {
+      drafts.clear();
+      const saved = JSON.parse(localStorage.getItem(`gb.drafts.${id}`) || '{}');
+      for (const [k, v] of Object.entries(saved)) drafts.set(k, v);
+    } catch { /* ignore */ }
+  }
+
+  const saveDrafts = () => {
+    if (!boardId) return;
+    const o = {}; for (const [k, v] of drafts) if (v) o[k] = v;
+    localStorage.setItem(`gb.drafts.${boardId}`, JSON.stringify(o));
+  };
+  const saveSeen = () => { if (boardId) localStorage.setItem(`gb.seen.${boardId}`, JSON.stringify([...seenIds])); };
+
+  // ------------------------------------------------------------ network
+  async function post(path, body) {
+    const r = await fetch(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
+
+  function setOffline(on) {
+    const b = document.getElementById('conn');
+    b.hidden = !on;
+    b.className = 'ghost offline';
+    b.textContent = 'board offline — server stopped';
+  }
+
+  // Poll fast while the board is filling or the conversation is live, slow when
+  // nothing has moved for a while. The empty case matters most: it is the gap
+  // between "Claude started the board" and "the first question is on screen".
+  let lastChangeAt = Date.now();
+  function pollDelay() {
+    if (!questions.length) return 400;
+    return Date.now() - lastChangeAt < 20000 ? 700 : 2500;
+  }
+
+  async function poll() {
+    let delay = 1500;
+    try {
+      const r = await fetch('/api/state', { cache: 'no-store' });
+      if (!r.ok) throw new Error('bad status');
+      const s = await r.json();
+      setOffline(false);
+      if (s.rev !== lastRev) { lastRev = s.rev; lastChangeAt = Date.now(); apply(s); }
+      delay = pollDelay();
+    } catch {
+      setOffline(true);
+    } finally {
+      setTimeout(poll, delay);
+    }
+  }
+
+  // ------------------------------------------------------------ render
+  function apply(s) {
+    bindStorage(s.boardId || 'legacy');
+    adoptPrefs(s.prefs);
+    const h1 = document.getElementById('title');
+    h1.textContent = s.title || 'Grill board';
+    h1.title = s.subtitle || '';
+    document.title = s.title || 'Grill board';
+
+    // The note is a liveness signal, not headline content — a dot you can hover,
+    // rather than a sentence eating a row of the bar.
+    const live = document.getElementById('live');
+    if (s.agentNote) {
+      live.hidden = false;
+      live.title = s.agentNote;
+      const age = s.agentNoteAt ? Date.now() - Date.parse(s.agentNoteAt) : 0;
+      live.classList.toggle('stale', age > 120000);
+    } else live.hidden = true;
+
+    questions = s.questions || [];
+    render();
+  }
+
+  // Depth-first by parent, so a follow-up sits directly under the answer that
+  // caused it rather than at the end of the thread it was appended to.
+  function orderThread(list) {
+    const kids = new Map();
+    for (const q of list) {
+      const k = q.parentId && list.some((p) => p.id === q.parentId) ? q.parentId : '__root';
+      if (!kids.has(k)) kids.set(k, []);
+      kids.get(k).push(q);
+    }
+    const out = [];
+    const walk = (key) => {
+      for (const q of kids.get(key) || []) { out.push(q); walk(q.id); }
+    };
+    walk('__root');
+    return out;
+  }
+
+  function optLabel(q, key) {
+    const o = q.options.find((x) => x.key === key);
+    return o ? o.label : key;
+  }
+
+  // -1 means "this card's horizontal axis has not been touched". Arriving at a
+  // card must not pre-highlight anything — a highlight you did not put there
+  // reads as a choice already made on your behalf.
+  const cursorIdx = (q) => (optCursor.has(q.id) ? optCursor.get(q.id) : -1);
+
+  // Index q.options.length is the "write your own" field: it is the last stop on
+  // the horizontal axis, so the note is reachable by the same ← → as the choices.
+  const noteIdx = (q) => q.options.length;
+
+  // First engagement lands on Claude's pick, which is the likely answer.
+  function entryIdx(q) {
+    const rec = q.options.findIndex((o) => o.recommended);
+    return rec >= 0 ? rec : 0;
+  }
+
+  function repaintOptions(qid) {
+    const q = questions.find((x) => x.id === qid);
+    const card = feed.querySelector(`[data-qid="${qid}"]`);
+    if (!q || !card) return;
+    const picked = sel.get(qid) || new Set();
+    const ci = cursorIdx(q);
+    card.querySelectorAll('[data-pick]').forEach((n, i) => {
+      n.classList.toggle('sel', picked.has(n.dataset.key));
+      n.classList.toggle('cursor', i === ci);
+    });
+    const own = card.querySelector('.own');
+    if (own) own.classList.toggle('cursor', ci === noteIdx(q));
+    refreshSend(qid);
+  }
+
+  function moveChoice(delta) {
+    const q = questions.find((x) => x.id === focusedQid);
+    const card = focusedQid ? feed.querySelector(`[data-qid="${focusedQid}"]`) : null;
+    if (!q || !card || card.classList.contains('done')) return;
+    const cur = cursorIdx(q);
+    const i = cur < 0 ? entryIdx(q) : Math.min(noteIdx(q), Math.max(0, cur + delta));
+    optCursor.set(q.id, i);
+    if (i === noteIdx(q)) {
+      const ta = card.querySelector('[data-own]');
+      if (ta) { ta.focus(); autosize(ta); }   // arriving here means you want to type
+    } else if (!q.multi) {
+      // With one answer allowed, moving IS choosing — there is nothing to
+      // confirm. With several, moving only highlights; space toggles.
+      const btn = card.querySelectorAll('[data-pick]')[i];
+      if (btn) btn.click();
+    }
+    repaintOptions(q.id);
+  }
+
+  // ---- scroll anchoring -----------------------------------------------
+  // The feed is rebuilt wholesale on every change, and changes routinely land
+  // ABOVE where you are reading: a card you answered collapses from ~600px to
+  // ~60px, a follow-up inserts under its parent, a queued card promotes. Left
+  // alone, the card under your eyes jumps. So: pin whichever card you are
+  // actually reading, and absorb the difference into the scroll offset.
+  function pickAnchor() {
+    if (window.scrollY < 40) return null; // at the top, let new content just show
+    for (const el of feed.querySelectorAll('[data-qid]')) {
+      const r = el.getBoundingClientRect();
+      if (r.bottom > 130) return { qid: el.dataset.qid, top: r.top };
+    }
+    return null;
+  }
+
+  function restoreAnchor(a) {
+    if (!a) return;
+    const el = feed.querySelector(`[data-qid="${a.qid}"]`);
+    if (!el) return;
+    const delta = el.getBoundingClientRect().top - a.top;
+    if (delta) window.scrollBy(0, delta); // instant — never smooth
+  }
+
+  // Offscreen-rendered tabs (Claude's Browser pane, some headless embeds) report
+  // innerHeight, clientHeight AND visualViewport all as 0. Without a fallback
+  // every visibility test below silently reads false and nothing is ever marked
+  // seen — the pill would sit there forever on a card you are looking at.
+  function viewportHeight() {
+    return window.innerHeight
+      || document.documentElement.clientHeight
+      || (window.visualViewport && window.visualViewport.height)
+      || 800;
+  }
+
+  // A card counts as seen once it has actually been in the viewport, so the
+  // "new" badge and the pill mean "arrived and you haven't looked at it".
+  function markVisibleSeen() {
+    let changed = false;
+    const vh = viewportHeight();
+    for (const el of feed.querySelectorAll('[data-qid]')) {
+      const r = el.getBoundingClientRect();
+      if (r.top < vh - 40 && r.bottom > 80 && !seenIds.has(el.dataset.qid)) {
+        seenIds.add(el.dataset.qid);
+        changed = true;
+      }
+    }
+    if (changed) saveSeen();
+    updateNewPill();
+  }
+
+  function updateNewPill() {
+    const pill = document.getElementById('newPill');
+    const unseen = questions.filter((q) => q.status === 'open' && !seenIds.has(q.id));
+    if (!unseen.length) { pill.hidden = true; return; }
+    const el = feed.querySelector(`[data-qid="${unseen[0].id}"]`);
+    const above = el ? el.getBoundingClientRect().top < 80 : false;
+    pill.hidden = false;
+    pill.textContent = `${unseen.length} new question${unseen.length > 1 ? 's' : ''} ${above ? '↑' : '↓'}`;
+    pill.onclick = () => {
+      const t = feed.querySelector(`[data-qid="${unseen[0].id}"]`);
+      if (!t) return;
+      window.scrollTo(0, t.getBoundingClientRect().top + window.scrollY - 110);
+      markVisibleSeen();
+    };
+  }
+
+  // Leading edge keeps it responsive while dragging; the trailing edge matters
+  // more — a single programmatic scroll lands inside the throttle window and
+  // would otherwise be dropped, leaving the pill up for a card you just read.
+  let scrollTick = 0, scrollTrail = null;
+  window.addEventListener('scroll', () => {
+    clearTimeout(scrollTrail);
+    scrollTrail = setTimeout(() => { markVisibleSeen(); syncFocusToViewport(); }, 180);
+    const now = Date.now();
+    if (now - scrollTick < 150) return;
+    scrollTick = now;
+    markVisibleSeen();
+    syncFocusToViewport();
+  }, { passive: true });
+
+  function render() {
+    const live = questions.filter((q) => q.status !== 'queued');
+    // Retired cards stay visible for the audit trail but can never be answered,
+    // so counting them would leave the meter permanently short of full.
+    const countable = live.filter((q) => q.status !== 'retired');
+    const answered = countable.filter((q) => q.status === 'answered' || q.status === 'skipped').length;
+    const open = questions.filter((q) => q.status === 'open').length;
+    const queued = questions.filter((q) => q.status === 'queued').length;
+
+    document.getElementById('bar').style.width = `${Math.round((answered / (countable.length || 1)) * 100)}%`;
+    document.getElementById('counts').textContent =
+      `${answered}/${countable.length} answered` + (queued ? ` · ${queued} queued` : '') + (open ? ` · ${open} open` : '');
+    document.getElementById('jump').hidden = !open;
+
+    if (!live.length) {
+      feed.innerHTML = '<div class="empty"><div class="big">No questions yet.</div>Claude is still reading. They will appear here.</div>';
+      return;
+    }
+
+    // Keep threads in the order their first question was asked; inside a thread
+    // keep ask order, so a follow-up sits directly under the answer that caused it.
+    const threads = [];
+    for (const q of live) if (!threads.includes(q.thread)) threads.push(q.thread);
+
+    const html = [];
+    for (const t of threads) {
+      const inThread = orderThread(live.filter((q) => q.thread === t));
+      const openCount = inThread.filter((q) => q.status === 'open').length;
+      html.push(
+        `<div class="thread-head"><h2>${esc(t)}</h2><div class="rule"></div>` +
+        `<span class="counts">${openCount ? `${openCount} open` : 'done'}</span></div>`
+      );
+      for (const q of inThread) html.push(card(q));
+    }
+    const markup = html.join('');
+    // A poll that changed nothing visible must not touch the DOM at all —
+    // rebuilding identical markup still drops selection rings, caret and scroll.
+    if (markup === lastHtml) { markVisibleSeen(); return; }
+
+    // Preserve focus + caret across re-renders, otherwise typing a note fights the poll.
+    const active = document.activeElement;
+    const keepId = active && active.dataset ? active.dataset.own : null;
+    const caret = keepId ? [active.selectionStart, active.selectionEnd] : null;
+    const anchor = pickAnchor();
+
+    lastHtml = markup;
+    feed.innerHTML = markup;
+    wire();
+    // Reopen expanded takes BEFORE anchoring — they change height, and the
+    // anchor has to be measured against the final layout.
+    for (const d of feed.querySelectorAll('[data-take]')) d.open = openTakes.has(d.dataset.take);
+    syncFocus();
+    restoreAnchor(anchor);
+
+    if (keepId) {
+      const ta = feed.querySelector(`textarea[data-own="${keepId}"]`);
+      if (ta) { ta.focus(); if (caret) ta.setSelectionRange(caret[0], caret[1]); }
+    }
+
+    // The seed batch is not "new" — you arrived to read it.
+    if (firstLoad) {
+      for (const q of live) seenIds.add(q.id);
+      firstLoad = false;
+      saveSeen();
+    }
+    markVisibleSeen();
+  }
+
+  function card(q) {
+    const isChild = (q.depth || 0) > 0;
+    const cls = ['card', isChild ? 'child' : ''];
+
+    if (q.status === 'retired') {
+      return `<div class="card retired ${isChild ? 'child' : ''}" data-qid="${q.id}"><div class="done-row">
+        <span class="tick">✕</span><div><div class="q">${esc(q.title)}</div>
+        <div class="a"><em>Retired — ${esc(q.retiredReason || '')}</em></div></div></div></div>`;
+    }
+
+    if ((q.status === 'answered' || q.status === 'skipped') && !expanded.has(q.id)) {
+      let ans;
+      if (q.status === 'skipped') ans = '<em>Skipped — your call, Claude</em>';
+      else {
+        const picked = (q.answer?.keys || []).map((k) => esc(optLabel(q, k))).join(' + ');
+        const txt = q.answer?.text ? `<em>${picked ? ' — ' : ''}“${esc(q.answer.text)}”</em>` : '';
+        ans = (picked || '') + txt || '<em>answered</em>';
+      }
+      return `<div class="card done ${isChild ? 'child' : ''}" data-open="${q.id}" data-qid="${q.id}">
+        <div class="done-row"><span class="tick">✓</span><div>
+          <div class="q">${esc(q.title)}</div><div class="a">${ans}</div>
+        </div></div></div>`;
+    }
+
+    const isNew = !seenIds.has(q.id) && !firstLoad;
+    if (isNew) cls.push('is-new');
+
+    const picked = sel.get(q.id) || new Set(q.answer?.keys || []);
+    sel.set(q.id, picked);
+    const draft = drafts.has(q.id) ? drafts.get(q.id) : (q.answer?.text || '');
+
+    const ci = cursorIdx(q);
+    const opts = q.options.map((o, i) => `
+      <button class="opt ${picked.has(o.key) ? 'sel' : ''} ${i === ci ? 'cursor' : ''}" data-pick="${q.id}" data-key="${esc(o.key)}">
+        <span class="key">${i < 9 ? i + 1 : esc(o.key)}</span>
+        <span class="body"><span class="label">${esc(o.label)}${o.recommended ? '<span class="star" title="Claude\'s pick">★</span>' : ''}</span>
+        ${o.detail ? `<span class="detail">${inline(o.detail)}</span>` : ''}</span>
+      </button>`).join('');
+
+    return `<div class="${cls.join(' ')}" id="card-${q.id}" data-qid="${q.id}"><div class="card-body">
+      <div class="card-meta">
+        ${isNew ? '<span class="chip new">new</span>' : ''}
+        <span class="chip">${esc(q.thread)}</span>
+        <span class="qid">${q.id}${q.multi ? ' · pick any' : ''}</span>
+      </div>
+      <h3 class="q-title">${esc(q.title)}</h3>
+      ${q.context ? `<div class="prose">${md(q.context)}</div>` : ''}
+      ${q.pushback ? `<div class="pushback-note">You pushed back: “${esc(q.pushback.text)}” — Claude is revising.</div>` : ''}
+      ${q.recommendation ? `<details class="take" data-take="${q.id}"><summary>Claude's take</summary><div class="prose">${md(q.recommendation)}</div></details>` : ''}
+      ${opts ? `<div class="options">${opts}</div>` : ''}
+      <div class="own ${ci === q.options.length ? 'cursor' : ''}">
+        <textarea data-own="${q.id}" rows="1" placeholder="${q.options.length ? 'Other — in your own words…' : 'Your answer…'}">${esc(draft)}</textarea>
+      </div>
+      <div class="actions">
+        <button class="send" data-send="${q.id}" ${picked.size || draft.trim() ? '' : 'disabled'}>Send</button>
+        <button class="link" data-skip="${q.id}">You decide</button>
+        <button class="link" data-push="${q.id}">Push back</button>
+        <span class="hint">${q.options.length ? '↑↓ cards · ←→ choices · ↵ send · ? keys' : '↑↓ cards · ↵ send · ? keys'}</span>
+      </div>
+    </div></div>`;
+  }
+
+  // ------------------------------------------------------------ interaction
+  // Grow the note field to fit its content. Deliberately NOT tied to focus:
+  // a box that expands on focus and shrinks on blur moves everything below it
+  // at the exact moment you are reaching for the Send button.
+  function autosize(ta) {
+    // An empty box keeps NO inline height, so CSS min-height governs. Measuring
+    // one costs nothing and risks a lot: if this runs while the container is
+    // mid-layout (or zero-width), the placeholder wraps to twenty lines and we
+    // would freeze that as an explicit height.
+    // Clearing rather than returning matters: it drops any height measured
+    // earlier under a bad layout instead of leaving it frozen in place.
+    if (!ta.value || ta.clientWidth < 80) { ta.style.height = ''; return; }
+    ta.style.height = 'auto';
+    ta.style.height = `${Math.max(42, ta.scrollHeight + 2)}px`;
+  }
+
+  // Width changes rewrap the text, so any stored height is stale.
+  window.addEventListener('resize', () => {
+    feed.querySelectorAll('[data-own]').forEach(autosize);
+  });
+
+  function refreshSend(qid) {
+    const btn = feed.querySelector(`[data-send="${qid}"]`);
+    if (!btn) return;
+    const picked = sel.get(qid) || new Set();
+    const draft = (drafts.get(qid) || '').trim();
+    btn.disabled = !(picked.size || draft);
+  }
+
+  function wire() {
+    feed.querySelectorAll('[data-pick]').forEach((el) => {
+      el.onclick = () => {
+        const qid = el.dataset.pick;
+        const key = el.dataset.key;
+        const q = questions.find((x) => x.id === qid);
+        const picked = sel.get(qid) || new Set();
+        if (q.multi) picked.has(key) ? picked.delete(key) : picked.add(key);
+        else { picked.clear(); picked.add(key); }
+        sel.set(qid, picked);
+        // Keep the keyboard cursor where the mouse just went, so switching
+        // between the two mid-card doesn't jump the highlight somewhere else.
+        const idx = q.options.findIndex((o) => o.key === key);
+        if (idx >= 0) optCursor.set(qid, idx);
+        feed.querySelectorAll(`[data-pick="${qid}"]`).forEach((n, i) => {
+          n.classList.toggle('sel', picked.has(n.dataset.key));
+          n.classList.toggle('cursor', i === idx);
+        });
+        refreshSend(qid);
+      };
+      el.ondblclick = () => send(el.dataset.pick);
+    });
+
+    feed.querySelectorAll('[data-own]').forEach((ta) => {
+      autosize(ta);
+      ta.oninput = () => {
+        drafts.set(ta.dataset.own, ta.value); saveDrafts();
+        refreshSend(ta.dataset.own); autosize(ta);
+      };
+      // A restored draft may have been sized before the page finished laying
+      // out; re-fit it the moment the field is actually used. Reaching the
+      // field by any route (← →, C, or a click) parks the cursor here, so
+      // stepping out with esc and pressing ← returns you to the choices.
+      ta.onfocus = () => {
+        autosize(ta);
+        const q = questions.find((x) => x.id === ta.dataset.own);
+        if (q) { optCursor.set(q.id, noteIdx(q)); repaintOptions(q.id); }
+      };
+      ta.onkeydown = (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); send(ta.dataset.own); }
+      };
+    });
+
+    // Keep focus in the textarea through the whole press. Without this the
+    // textarea blurs on mousedown, and any resulting reflow can move the button
+    // before mouseup — so the click is swallowed and you have to press twice.
+    feed.querySelectorAll('[data-send],[data-skip],[data-push]').forEach((b) => {
+      b.onmousedown = (e) => e.preventDefault();
+    });
+
+    feed.querySelectorAll('[data-send]').forEach((b) => { b.onclick = () => send(b.dataset.send); });
+    feed.querySelectorAll('[data-skip]').forEach((b) => { b.onclick = () => skip(b.dataset.skip); });
+    feed.querySelectorAll('[data-push]').forEach((b) => { b.onclick = () => pushback(b.dataset.push); });
+    feed.querySelectorAll('[data-open]').forEach((c) => {
+      c.onclick = () => { expanded.add(c.dataset.open); render(); };
+    });
+    // Remember which takes are expanded — the feed is rebuilt wholesale, and
+    // an open <details> that snaps shut under you reads as the page glitching.
+    feed.querySelectorAll('[data-take]').forEach((d) => {
+      d.ontoggle = () => {
+        d.open ? openTakes.add(d.dataset.take) : openTakes.delete(d.dataset.take);
+      };
+    });
+  }
+
+  async function send(qid) {
+    if (inflight.has(qid)) return;
+    const picked = [...(sel.get(qid) || new Set())];
+    const text = (drafts.get(qid) || '').trim();
+    if (!picked.length && !text) return;
+    inflight.add(qid);
+    // Optimistic: mark it done locally so the next poll doesn't bounce it back open.
+    const q = questions.find((x) => x.id === qid);
+    if (q) { q.status = 'answered'; q.answer = { keys: picked, text: text || null }; }
+    expanded.delete(qid);
+    drafts.delete(qid); saveDrafts();
+    render();
+    try {
+      await post('/api/answer', { id: qid, keys: picked, text });
+      lastRev = null; // force a refresh so queued questions promote into view
+    } catch {
+      setOffline(true);
+    } finally { inflight.delete(qid); }
+  }
+
+  async function skip(qid) {
+    const q = questions.find((x) => x.id === qid);
+    if (q) { q.status = 'skipped'; q.answer = { keys: [], text: null, skipped: true }; }
+    expanded.delete(qid);
+    render();
+    try { await post('/api/skip', { id: qid }); lastRev = null; } catch { setOffline(true); }
+  }
+
+  async function pushback(qid) {
+    const q = questions.find((x) => x.id === qid);
+    const text = prompt(`What's wrong with this question?\n\n“${q ? q.title : ''}”`);
+    if (!text || !text.trim()) return;
+    if (q) q.pushback = { text: text.trim() };
+    render();
+    try { await post('/api/pushback', { id: qid, text: text.trim() }); lastRev = null; } catch { setOffline(true); }
+  }
+
+  // ------------------------------------------------------------ theme
+  const SUN = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="3.1"/><path d="M8 1v1.6M8 13.4V15M15 8h-1.6M2.6 8H1M12.9 3.1l-1.1 1.1M4.2 11.8l-1.1 1.1M12.9 12.9l-1.1-1.1M4.2 4.2 3.1 3.1"/></svg>';
+  const MOON = '<svg viewBox="0 0 16 16" width="14" height="14"><path fill="currentColor" d="M6.1 1.5A6.5 6.5 0 1 0 14.5 9.9 5.3 5.3 0 0 1 6.1 1.5Z"/></svg>';
+  const SWATCH = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="6" cy="6" r="3.4"/><circle cx="10.6" cy="10.4" r="3.4"/></svg>';
+  const themeBtn = document.getElementById('theme');
+  const palBtn = document.getElementById('palette');
+  const pop = document.getElementById('pop');
+  const root = document.documentElement;
+
+  // label + one-line note + the four swatches shown per mode (page, card, ink,
+  // accent). Generated alongside the CSS above, so the two cannot drift.
+  const PALETTES = {
+    gruvbox: { label: "Gruvbox", note: "Warm retro. Cream paper, amber accent.", light: ["#f2e5bc","#fbf1c7","#3c3836","#af3a03"], dark: ["#282828","#32302f","#ebdbb2","#fe831e"] },
+    catppuccin: { label: "Catppuccin", note: "Soft pastel. Latte and Mocha.", light: ["#e6e9ef","#eff1f5","#4c4f69","#8036e1"], dark: ["#181825","#1e1e2e","#cdd6f4","#cba6f7"] },
+    nord: { label: "Nord", note: "Arctic blue-grey. Cool and even.", light: ["#e5e9f0","#eceff4","#2e3440","#496586"], dark: ["#2e3440","#3b4252","#eceff4","#8dc3d2"] },
+    solarized: { label: "Solarized", note: "The 2011 classic. Precision-tuned pair.", light: ["#eee8d5","#fdf6e3","#073642","#b34213"], dark: ["#002b36","#073642","#93a1a1","#e09373"] },
+    rosepine: { label: "Rosé Pine", note: "Muted rose and pine. Quiet, elegant.", light: ["#f2e9e1","#fffaf3","#575279","#975366"], dark: ["#232136","#2a273f","#e0def4","#ea9a97"] },
+    everforest: { label: "Everforest", note: "Soft green. Built for long sessions.", light: ["#efebd4","#fdf6e3","#5c6a72","#9d5018"], dark: ["#2d353b","#343f44","#d3c6aa","#e9a486"] },
+    tokyonight: { label: "Tokyo Night", note: "Modern indigo. Day and Night.", light: ["#d9dbe4","#e6e7ed","#343b58","#225dac"], dark: ["#1a1b26","#24283b","#c0caf5","#7aa2f7"] },
+    github: { label: "GitHub", note: "Neutral and familiar. The brightest light option.", light: ["#eaeef2","#ffffff","#1f2328","#0967d6"], dark: ["#0d1117","#161b22","#e6edf3","#58a6ff"] },
+  };
+
+  function paintThemeButton() {
+    // Show where the click goes, not where you are.
+    themeBtn.innerHTML = root.dataset.theme === 'dark' ? SUN : MOON;
+    palBtn.innerHTML = SWATCH;
+  }
+
+  function applyTheme({ mode, palette }) {
+    if (mode) root.dataset.theme = mode;
+    if (palette) root.dataset.palette = palette;
+    try {
+      localStorage.setItem('gb.theme', root.dataset.theme);
+      localStorage.setItem('gb.palette', root.dataset.palette);
+    } catch { /* private mode */ }
+    // localStorage is per-origin and every board gets its own port, so the
+    // server keeps the durable copy — that is what carries the choice to the
+    // next board. The local copy only exists to avoid a flash before first paint.
+    post('/api/prefs', { theme: root.dataset.theme, palette: root.dataset.palette })
+      .catch(() => { /* the local copy still holds */ });
+    paintThemeButton();
+    renderPicker();
+  }
+
+  function renderPicker() {
+    const mode = root.dataset.theme;
+    const cur = root.dataset.palette;
+    pop.querySelectorAll('.modes button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
+    const list = document.getElementById('palList');
+    list.innerHTML = Object.entries(PALETTES).map(([k, v]) => `
+      <button class="pal ${k === cur ? 'on' : ''}" data-pal="${k}">
+        <span class="sw">${v[mode].map((c) => `<i style="background:${c}"></i>`).join('')}</span>
+        <span><span class="nm">${esc(v.label)}</span><span class="nt">${esc(v.note)}</span></span>
+      </button>`).join('');
+    list.querySelectorAll('[data-pal]').forEach((b) => {
+      b.onclick = () => applyTheme({ palette: b.dataset.pal });
+    });
+  }
+
+  // Take the server's stored choice once, on the first state we receive. After
+  // that this tab is authoritative, so a later poll never yanks the theme out
+  // from under someone who just changed it.
+  let prefsAdopted = false;
+  function adoptPrefs(prefs) {
+    if (prefsAdopted) return;
+    prefsAdopted = true;
+    if (!prefs) return;
+    let changed = false;
+    if ((prefs.theme === 'light' || prefs.theme === 'dark') && prefs.theme !== root.dataset.theme) {
+      root.dataset.theme = prefs.theme; changed = true;
+    }
+    if (prefs.palette && PALETTES[prefs.palette] && prefs.palette !== root.dataset.palette) {
+      root.dataset.palette = prefs.palette; changed = true;
+    }
+    if (!changed) return;
+    try {
+      localStorage.setItem('gb.theme', root.dataset.theme);
+      localStorage.setItem('gb.palette', root.dataset.palette);
+    } catch { /* private mode */ }
+    paintThemeButton();
+    renderPicker();
+  }
+
+  themeBtn.onclick = () => applyTheme({ mode: root.dataset.theme === 'dark' ? 'light' : 'dark' });
+  palBtn.onclick = (e) => { e.stopPropagation(); pop.hidden = !pop.hidden; if (!pop.hidden) renderPicker(); };
+  pop.onclick = (e) => e.stopPropagation();
+  pop.querySelectorAll('.modes button').forEach((b) => {
+    b.onclick = () => applyTheme({ mode: b.dataset.mode });
+  });
+  document.addEventListener('click', () => { pop.hidden = true; });
+  // Escape is handled once, in the keyboard section, so it can close the right
+  // layer instead of every layer at once.
+  paintThemeButton();
+  renderPicker();
+
+  // Deliberately does NOT track prefers-color-scheme. The board has a fixed
+  // default (Nord dark) and an explicit switch; following the OS on top of that
+  // would flip the theme under a viewer who never asked for it.
+
+  // ------------------------------------------------------------ header actions
+  document.getElementById('jump').onclick = () => {
+    const first = feed.querySelector('.card:not(.done):not(.retired)');
+    if (first) window.scrollTo(0, first.getBoundingClientRect().top + window.scrollY - 110);
+  };
+
+  const dlg = document.getElementById('msgDlg');
+  // A closed <dialog> leaves focus on the field inside it, which reads as
+  // "typing" forever after — every single-letter shortcut silently stops
+  // working with nothing on screen to explain why. Hand focus back to the board.
+  for (const d of [dlg, document.getElementById('helpDlg')]) {
+    d.addEventListener('close', () => {
+      const a = document.activeElement;
+      if (a && d.contains(a) && a.blur) a.blur();
+    });
+  }
+  document.getElementById('msg').onclick = () => { dlg.showModal(); document.getElementById('msgText').focus(); };
+  dlg.addEventListener('close', async () => {
+    if (dlg.returnValue !== 'send') return;
+    const t = document.getElementById('msgText').value.trim();
+    document.getElementById('msgText').value = '';
+    if (!t) return;
+    try { await post('/api/message', { text: t }); lastRev = null; } catch { setOffline(true); }
+  });
+
+  // ------------------------------------------------------------ keyboard
+  // A real cursor rather than "whichever card is near the top": every card-level
+  // key acts on the focused card, and the cursor survives the feed being rebuilt.
+  const helpDlg = document.getElementById('helpDlg');
+  let focusedQid = null;
+
+  const focusables = () =>
+    [...feed.querySelectorAll('[data-qid]')].filter((el) => !el.classList.contains('retired'));
+
+  function paintFocus() {
+    for (const el of feed.querySelectorAll('[data-qid]')) {
+      el.classList.toggle('focused', el.dataset.qid === focusedQid);
+    }
+  }
+
+  function reveal(el) {
+    const r = el.getBoundingClientRect();
+    const top = 110; // clear the sticky header
+    const bottom = viewportHeight() - 20;
+    if (r.top < top) window.scrollBy(0, r.top - top);
+    else if (r.top > bottom) window.scrollBy(0, r.top - top);
+    else if (r.bottom > bottom && r.height < bottom - top) window.scrollBy(0, r.bottom - bottom);
+  }
+
+  function setFocus(qid, { scroll = true } = {}) {
+    focusedQid = qid;
+    paintFocus();
+    const el = feed.querySelector(`[data-qid="${qid}"]`);
+    if (el && scroll) reveal(el);
+  }
+
+  function moveFocus(delta) {
+    const list = focusables();
+    if (!list.length) return;
+    const i = list.findIndex((el) => el.dataset.qid === focusedQid);
+    const next = i < 0 ? 0 : Math.min(list.length - 1, Math.max(0, i + delta));
+    setFocus(list[next].dataset.qid);
+  }
+
+  // After a render: keep the cursor if its card still exists, else put it on the
+  // first unanswered card so the keyboard is never left pointing at nothing.
+  function syncFocus() {
+    const list = focusables();
+    if (!list.length) { focusedQid = null; return; }
+    if (!list.some((el) => el.dataset.qid === focusedQid)) {
+      focusedQid = (list.find((el) => !el.classList.contains('done')) || list[0]).dataset.qid;
+    }
+    paintFocus();
+  }
+
+  // Scrolling by mouse shouldn't leave the cursor on a card you can no longer
+  // see — the next keystroke would act somewhere invisible.
+  function syncFocusToViewport() {
+    const el = focusedQid ? feed.querySelector(`[data-qid="${focusedQid}"]`) : null;
+    if (el) {
+      const r = el.getBoundingClientRect();
+      if (r.bottom > 90 && r.top < viewportHeight() - 20) return;
+    }
+    const first = focusables().find((c) => c.getBoundingClientRect().bottom > 130);
+    if (first) { focusedQid = first.dataset.qid; paintFocus(); }
+  }
+
+  document.addEventListener('keydown', (e) => {
+    const active = document.activeElement;
+    const tag = (active && active.tagName || '').toLowerCase();
+    // A field inside a CLOSED dialog can keep document focus after the dialog
+    // goes away. Treating that as "typing" wedges every single-letter shortcut
+    // with nothing on screen to explain it, so discount it explicitly rather
+    // than relying on the close event to hand focus back.
+    const stale = active && active.closest && active.closest('dialog:not([open])');
+    const typing = (tag === 'textarea' || tag === 'input') && !stale;
+
+    if (e.key === 'Escape') {
+      if (helpDlg.open) { helpDlg.close(); return; }
+      if (dlg.open) return;                       // the dialog closes itself
+      if (!pop.hidden) { pop.hidden = true; return; }
+      if (typing) { e.preventDefault(); document.activeElement.blur(); }
+      return;
+    }
+    if (typing || dlg.open || helpDlg.open) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (!pop.hidden && e.key.toLowerCase() !== 'p' && e.key !== ',') return; // picker open: only Esc and p
+
+    const k = e.key;
+    const lower = k.length === 1 ? k.toLowerCase() : k;
+    const stop = () => e.preventDefault();
+
+    // Board-level
+    if (k === '?') { stop(); helpDlg.showModal(); return; }
+    if (lower === 'm') { stop(); dlg.showModal(); document.getElementById('msgText').focus(); return; }
+    if (lower === 'l') { stop(); applyTheme({ mode: root.dataset.theme === 'dark' ? 'light' : 'dark' }); return; }
+    if (lower === 'p' || k === ',') { stop(); pop.hidden = !pop.hidden; if (!pop.hidden) renderPicker(); return; }
+
+    // Vertical moves between cards; horizontal moves between that card's choices.
+    if (lower === 's' || k === 'ArrowDown' || lower === 'j') { stop(); moveFocus(1); return; }
+    if (lower === 'w' || k === 'ArrowUp' || lower === 'k') { stop(); moveFocus(-1); return; }
+    if (lower === 'd' || k === 'ArrowRight') { stop(); moveChoice(1); return; }
+    if (lower === 'a' || k === 'ArrowLeft') { stop(); moveChoice(-1); return; }
+    if (k === 'Home' || k === 'g') { stop(); const l = focusables(); if (l.length) setFocus(l[0].dataset.qid); return; }
+    if (k === 'End' || k === 'G') { stop(); const l = focusables(); if (l.length) setFocus(l[l.length - 1].dataset.qid); return; }
+    if (lower === 'n') {
+      stop();
+      const l = focusables();
+      const open = l.filter((el) => !el.classList.contains('done'));
+      if (!open.length) return;
+      const cur = l.findIndex((el) => el.dataset.qid === focusedQid);
+      setFocus((open.find((el) => l.indexOf(el) > cur) || open[0]).dataset.qid);
+      return;
+    }
+
+    // Card-level
+    const card = focusedQid ? feed.querySelector(`[data-qid="${focusedQid}"]`) : null;
+    if (!card) return;
+    const qid = focusedQid;
+    const answered = card.classList.contains('done');
+
+    if (/^[1-9]$/.test(k)) {
+      if (answered) return;
+      const pick = card.querySelectorAll('[data-pick]')[Number(k) - 1];
+      if (pick) { stop(); pick.click(); }
+      return;
+    }
+    if (k === ' ') {
+      if (answered) return;
+      const q = questions.find((x) => x.id === qid);
+      if (!q) return;
+      stop();
+      // Untouched card: space commits Claude's pick without you having to walk
+      // the list. Parked on the note field: space starts typing instead.
+      const i = cursorIdx(q) < 0 ? entryIdx(q) : cursorIdx(q);
+      optCursor.set(qid, i);
+      if (i === noteIdx(q)) {
+        const ta = card.querySelector('[data-own]');
+        if (ta) { ta.focus(); autosize(ta); }
+      } else {
+        const btn = card.querySelectorAll('[data-pick]')[i];
+        if (btn) btn.click();
+      }
+      repaintOptions(qid);
+      return;
+    }
+    if (k === 'Enter') {
+      stop();
+      if (answered) { expanded.add(qid); render(); setFocus(qid, { scroll: false }); }
+      else send(qid);
+      return;
+    }
+    if (lower === 'c') {
+      if (answered) return;
+      const ta = card.querySelector('[data-own]');
+      const q = questions.find((x) => x.id === qid);
+      if (!ta || !q) return;
+      stop();
+      // Park the cursor here explicitly rather than leaning on the focus event:
+      // calling focus() on an already-focused field fires nothing, and then
+      // esc + ← would walk back from the wrong place.
+      optCursor.set(qid, noteIdx(q));
+      ta.focus();
+      autosize(ta);
+      repaintOptions(qid);
+      return;
+    }
+    if (lower === 'x' && !answered) { stop(); skip(qid); return; }
+    if (lower === 'r' && !answered) { stop(); pushback(qid); return; }
+    if (lower === 'e') {
+      const d = card.querySelector('[data-take]');
+      if (d) { stop(); d.open = !d.open; }
+    }
+  });
+
+  poll();
+})();
+</script>
+</body>
+</html>

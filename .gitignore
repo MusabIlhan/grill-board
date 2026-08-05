@@ -1,0 +1,8 @@
+# Runtime state, in case a board is ever pointed at --state inside the repo
+*.lock
+*.tmp
+url
+state.json
+
+.DS_Store
+node_modules/
