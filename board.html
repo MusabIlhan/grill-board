@@ -357,9 +357,9 @@
   }
   .opt:hover { border-color: var(--ink-3); background: var(--panel-2); }
   .opt.sel { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
-  /* Where ← → / a d currently sit. Only meaningful on the focused card, and
-     only visible when it isn't already the selection. */
-  .card.focused .opt.cursor:not(.sel) { border-color: var(--ink-3); background: var(--panel-2); }
+  /* Shown only once you have stepped INTO a card's choices, so a card you are
+     merely passing over never looks like it has a choice already made on it. */
+  .card.focused.in-options .opt.cursor:not(.sel) { border-color: var(--ink-3); background: var(--panel-2); }
   .opt .key {
     flex: none; width: 20px; height: 20px; border-radius: 6px; margin-top: 1px;
     background: var(--panel-2); border: 1px solid var(--line-2);
@@ -383,9 +383,9 @@
     padding: 10px 13px;
   }
   .own textarea:focus { outline: none; border-style: solid; border-color: var(--accent); background: var(--panel); }
-  /* The note field is the last stop on the horizontal axis; this is how it
-     looks when the cursor is parked there but you have stepped out with esc. */
-  .card.focused .own.cursor textarea:not(:focus) { border-style: solid; border-color: var(--ink-3); background: var(--panel); }
+  /* The note field is the last row of the choice list — how it looks when the
+     cursor is on it but you have not stepped in to type yet. */
+  .card.focused.in-options .own.cursor textarea:not(:focus) { border-style: solid; border-color: var(--ink-3); background: var(--panel); }
   .own textarea::placeholder { color: var(--ink-3); }
 
   .actions { display: flex; align-items: center; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
@@ -523,9 +523,10 @@
     <h3>Keyboard</h3>
     <p>Everything on this board can be done without the mouse.</p>
     <dl class="keys">
-      <div class="sect">Moving — up/down between cards, left/right between choices</div>
-      <dt><kbd>W</kbd> <kbd>S</kbd> / <kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Previous / next card</dd>
-      <dt><kbd>A</kbd> <kbd>D</kbd> / <kbd>←</kbd> <kbd>→</kbd></dt><dd>Move through the choices — past the last one is "write your own"</dd>
+      <div class="sect">Moving — up/down always moves, right steps in, left steps out</div>
+      <dt><kbd>W</kbd> <kbd>S</kbd> / <kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Up and down — between cards, or between that card's choices once you're in them</dd>
+      <dt><kbd>D</kbd> / <kbd>→</kbd></dt><dd>Step in: card → its choices → typing your own</dd>
+      <dt><kbd>A</kbd> / <kbd>←</kbd></dt><dd>Step back out to the cards</dd>
       <dt><kbd>N</kbd></dt><dd>Jump to the next unanswered card</dd>
       <dt><kbd>home</kbd> <kbd>end</kbd></dt><dd>First / last card</dd>
 
@@ -803,19 +804,53 @@
     refreshSend(qid);
   }
 
+  // ---- two levels: cards, and the choices inside one card --------------
+  // Up/down always means up/down — it just applies to whichever level you are
+  // on. Right steps INTO a thing, left steps back OUT of it.
+  const focusedCardEl = () => (focusedQid ? feed.querySelector(`[data-qid="${focusedQid}"]`) : null);
+  const focusedQ = () => questions.find((x) => x.id === focusedQid);
+
+  function enterOptions() {
+    const q = focusedQ();
+    const card = focusedCardEl();
+    if (!q || !card || card.classList.contains('done')) return;
+    focusLevel = 'option';
+    const i = cursorIdx(q) < 0 ? entryIdx(q) : cursorIdx(q);
+    optCursor.set(q.id, i);
+    // Landing on a choice takes it when only one is allowed, so → then ↵ is
+    // enough to accept Claude's pick. The note row is entered, not taken.
+    if (i !== noteIdx(q) && !q.multi) {
+      const btn = card.querySelectorAll('[data-pick]')[i];
+      if (btn) btn.click();
+    }
+    paintFocus();
+    repaintOptions(q.id);
+  }
+
+  function exitOptions() {
+    focusLevel = 'card';
+    paintFocus();
+  }
+
+  // Right on the note row is the step that starts typing.
+  function enterNote() {
+    const q = focusedQ();
+    const card = focusedCardEl();
+    if (!q || !card || cursorIdx(q) !== noteIdx(q)) return;
+    const ta = card.querySelector('[data-own]');
+    if (ta) { ta.focus(); autosize(ta); }
+  }
+
   function moveChoice(delta) {
-    const q = questions.find((x) => x.id === focusedQid);
-    const card = focusedQid ? feed.querySelector(`[data-qid="${focusedQid}"]`) : null;
+    const q = focusedQ();
+    const card = focusedCardEl();
     if (!q || !card || card.classList.contains('done')) return;
     const cur = cursorIdx(q);
-    const i = cur < 0 ? entryIdx(q) : Math.min(noteIdx(q), Math.max(0, cur + delta));
+    const i = Math.min(noteIdx(q), Math.max(0, (cur < 0 ? entryIdx(q) : cur) + delta));
     optCursor.set(q.id, i);
-    if (i === noteIdx(q)) {
-      const ta = card.querySelector('[data-own]');
-      if (ta) { ta.focus(); autosize(ta); }   // arriving here means you want to type
-    } else if (!q.multi) {
-      // With one answer allowed, moving IS choosing — there is nothing to
-      // confirm. With several, moving only highlights; space toggles.
+    // One answer allowed: moving IS choosing, as in a native radio group.
+    // Several allowed: moving only highlights, and space toggles.
+    if (i !== noteIdx(q) && !q.multi) {
       const btn = card.querySelectorAll('[data-pick]')[i];
       if (btn) btn.click();
     }
@@ -1027,7 +1062,7 @@
         <button class="send" data-send="${q.id}" ${picked.size || draft.trim() ? '' : 'disabled'}>Send</button>
         <button class="link" data-skip="${q.id}">You decide</button>
         <button class="link" data-push="${q.id}">Push back</button>
-        <span class="hint">${q.options.length ? '↑↓ cards · ←→ choices · ↵ send · ? keys' : '↑↓ cards · ↵ send · ? keys'}</span>
+        <span class="hint">${q.options.length ? '↑↓ move · → into choices · ↵ send · ? keys' : '↑↓ move · → to write · ↵ send · ? keys'}</span>
       </div>
     </div></div>`;
   }
@@ -1075,6 +1110,11 @@
         // between the two mid-card doesn't jump the highlight somewhere else.
         const idx = q.options.findIndex((o) => o.key === key);
         if (idx >= 0) optCursor.set(qid, idx);
+        // Clicking a choice means you are working inside that card, so the
+        // keyboard picks up where the mouse left off rather than somewhere else.
+        focusedQid = qid;
+        focusLevel = 'option';
+        paintFocus();
         feed.querySelectorAll(`[data-pick="${qid}"]`).forEach((n, i) => {
           n.classList.toggle('sel', picked.has(n.dataset.key));
           n.classList.toggle('cursor', i === idx);
@@ -1097,7 +1137,12 @@
       ta.onfocus = () => {
         autosize(ta);
         const q = questions.find((x) => x.id === ta.dataset.own);
-        if (q) { optCursor.set(q.id, noteIdx(q)); repaintOptions(q.id); }
+        if (!q) return;
+        optCursor.set(q.id, noteIdx(q));
+        focusedQid = q.id;
+        focusLevel = 'option';
+        paintFocus();
+        repaintOptions(q.id);
       };
       ta.onkeydown = (e) => {
         if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); send(ta.dataset.own); }
@@ -1292,13 +1337,16 @@
   // key acts on the focused card, and the cursor survives the feed being rebuilt.
   const helpDlg = document.getElementById('helpDlg');
   let focusedQid = null;
+  let focusLevel = 'card'; // 'card' | 'option'
 
   const focusables = () =>
     [...feed.querySelectorAll('[data-qid]')].filter((el) => !el.classList.contains('retired'));
 
   function paintFocus() {
     for (const el of feed.querySelectorAll('[data-qid]')) {
-      el.classList.toggle('focused', el.dataset.qid === focusedQid);
+      const on = el.dataset.qid === focusedQid;
+      el.classList.toggle('focused', on);
+      el.classList.toggle('in-options', on && focusLevel === 'option');
     }
   }
 
@@ -1312,6 +1360,10 @@
   }
 
   function setFocus(qid, { scroll = true } = {}) {
+    // Landing on a different card always drops back to the card level — being
+    // "inside the choices" of a card you just left makes no sense, and would
+    // silently send the next up/down to the wrong list.
+    if (qid !== focusedQid) focusLevel = 'card';
     focusedQid = qid;
     paintFocus();
     const el = feed.querySelector(`[data-qid="${qid}"]`);
@@ -1323,6 +1375,7 @@
     if (!list.length) return;
     const i = list.findIndex((el) => el.dataset.qid === focusedQid);
     const next = i < 0 ? 0 : Math.min(list.length - 1, Math.max(0, i + delta));
+    focusLevel = 'card'; // leaving a card always drops back to the card level
     setFocus(list[next].dataset.qid);
   }
 
@@ -1333,7 +1386,11 @@
     if (!list.length) { focusedQid = null; return; }
     if (!list.some((el) => el.dataset.qid === focusedQid)) {
       focusedQid = (list.find((el) => !el.classList.contains('done')) || list[0]).dataset.qid;
+      focusLevel = 'card'; // the card we were inside is gone
     }
+    // Answering collapses the card, so there are no longer any choices to be in.
+    const cur = list.find((el) => el.dataset.qid === focusedQid);
+    if (cur && cur.classList.contains('done')) focusLevel = 'card';
     paintFocus();
   }
 
@@ -1346,7 +1403,7 @@
       if (r.bottom > 90 && r.top < viewportHeight() - 20) return;
     }
     const first = focusables().find((c) => c.getBoundingClientRect().bottom > 130);
-    if (first) { focusedQid = first.dataset.qid; paintFocus(); }
+    if (first) setFocus(first.dataset.qid, { scroll: false }); // also drops the level
   }
 
   document.addEventListener('keydown', (e) => {
@@ -1380,11 +1437,20 @@
     if (lower === 'l') { stop(); applyTheme({ mode: root.dataset.theme === 'dark' ? 'light' : 'dark' }); return; }
     if (lower === 'p' || k === ',') { stop(); pop.hidden = !pop.hidden; if (!pop.hidden) renderPicker(); return; }
 
-    // Vertical moves between cards; horizontal moves between that card's choices.
-    if (lower === 's' || k === 'ArrowDown' || lower === 'j') { stop(); moveFocus(1); return; }
-    if (lower === 'w' || k === 'ArrowUp' || lower === 'k') { stop(); moveFocus(-1); return; }
-    if (lower === 'd' || k === 'ArrowRight') { stop(); moveChoice(1); return; }
-    if (lower === 'a' || k === 'ArrowLeft') { stop(); moveChoice(-1); return; }
+    // Up/down is always up/down — it just applies to the level you are on.
+    // Right steps in (card → its choices → typing), left steps back out.
+    if (lower === 's' || k === 'ArrowDown' || lower === 'j') {
+      stop(); focusLevel === 'option' ? moveChoice(1) : moveFocus(1); return;
+    }
+    if (lower === 'w' || k === 'ArrowUp' || lower === 'k') {
+      stop(); focusLevel === 'option' ? moveChoice(-1) : moveFocus(-1); return;
+    }
+    if (lower === 'd' || k === 'ArrowRight') {
+      stop(); focusLevel === 'card' ? enterOptions() : enterNote(); return;
+    }
+    if (lower === 'a' || k === 'ArrowLeft') {
+      stop(); if (focusLevel === 'option') exitOptions(); return;
+    }
     if (k === 'Home' || k === 'g') { stop(); const l = focusables(); if (l.length) setFocus(l[0].dataset.qid); return; }
     if (k === 'End' || k === 'G') { stop(); const l = focusables(); if (l.length) setFocus(l[l.length - 1].dataset.qid); return; }
     if (lower === 'n') {
@@ -1414,9 +1480,9 @@
       const q = questions.find((x) => x.id === qid);
       if (!q) return;
       stop();
-      // Untouched card: space commits Claude's pick without you having to walk
-      // the list. Parked on the note field: space starts typing instead.
-      const i = cursorIdx(q) < 0 ? entryIdx(q) : cursorIdx(q);
+      // From the card level this commits Claude's pick without stepping in at
+      // all, so N → space → ↵ is never needed for the common answer.
+      const i = focusLevel === 'option' && cursorIdx(q) >= 0 ? cursorIdx(q) : entryIdx(q);
       optCursor.set(qid, i);
       if (i === noteIdx(q)) {
         const ta = card.querySelector('[data-own]');
@@ -1442,10 +1508,12 @@
       stop();
       // Park the cursor here explicitly rather than leaning on the focus event:
       // calling focus() on an already-focused field fires nothing, and then
-      // esc + ← would walk back from the wrong place.
+      // esc + ↑ would walk back from the wrong place.
       optCursor.set(qid, noteIdx(q));
+      focusLevel = 'option';
       ta.focus();
       autosize(ta);
+      paintFocus();
       repaintOptions(qid);
       return;
     }

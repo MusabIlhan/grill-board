@@ -40,16 +40,27 @@ It prints a `localhost` URL and a LAN one — the board answers fine from a phon
 
 Everything works from the keyboard. Press <kbd>?</kbd> on the board for the list.
 
+Navigation has two levels — the cards, and the choices inside one card.
+**Up/down always moves. Right steps in, left steps back out.**
+
+```
+cards  ──→──  that card's choices  ──→──  typing your own
+       ←──                         ←── esc
+```
+
 | | |
 |---|---|
-| <kbd>W</kbd> <kbd>S</kbd> / <kbd>↑</kbd> <kbd>↓</kbd> | Previous / next card |
-| <kbd>A</kbd> <kbd>D</kbd> / <kbd>←</kbd> <kbd>→</kbd> | Move through the choices — past the last one is "write your own" |
+| <kbd>W</kbd> <kbd>S</kbd> / <kbd>↑</kbd> <kbd>↓</kbd> | Up and down, on whichever level you're on |
+| <kbd>D</kbd> / <kbd>→</kbd> | Step in · <kbd>A</kbd> / <kbd>←</kbd> step out |
 | <kbd>N</kbd> | Next unanswered |
 | <kbd>1</kbd>–<kbd>9</kbd> | Pick a choice directly |
-| <kbd>space</kbd> | Take the highlighted choice — on an untouched card, Claude's pick |
+| <kbd>space</kbd> | Take the highlighted choice — from the card level, Claude's pick |
 | <kbd>↵</kbd> | Send, or reopen an answered card |
 | <kbd>C</kbd> <kbd>X</kbd> <kbd>R</kbd> <kbd>E</kbd> | Write your own · you decide · push back · Claude's take |
 | <kbd>M</kbd> <kbd>L</kbd> <kbd>P</kbd> | Tell Claude something · light/dark · palette |
+
+A card you're merely passing over never shows a highlighted choice — a highlight
+you didn't put there reads as a decision already made for you.
 
 **Push back** is the one worth knowing about: it tells the session the *question*
 is wrong, and it retires and re-asks rather than defending it.
