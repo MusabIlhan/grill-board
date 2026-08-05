@@ -300,8 +300,10 @@
   .card.child::before { content: ""; }
   .card.is-new { border-color: var(--accent); }
   /* The keyboard cursor. Outline rather than border so it never reflows the
-     card, and so it reads distinctly from the accent border on a new one. */
-  .card.focused { outline: 2px solid var(--accent); outline-offset: 2px; }
+     card, and so it reads distinctly from the accent border on a new one.
+     It drops once you step INTO the card: focus is on a choice now, and two
+     rings at once would leave the real cursor ambiguous. */
+  .card.focused:not(.in-options) { outline: 2px solid var(--accent); outline-offset: 2px; }
   .card.done { box-shadow: none; background: transparent; border-style: dashed; }
   .card.retired { opacity: .5; }
 
@@ -828,8 +830,17 @@
   }
 
   function exitOptions() {
+    // Stepping back out means "never mind". A choice you only moved through on
+    // the way past is not an answer, so it must not linger looking like one.
+    // The typed draft is left alone — that is content you wrote, not a cursor.
+    const q = focusedQ();
+    if (q) {
+      sel.delete(q.id);
+      optCursor.delete(q.id);
+    }
     focusLevel = 'card';
     paintFocus();
+    if (q) repaintOptions(q.id);
   }
 
   // Right on the note row is the step that starts typing.
