@@ -90,14 +90,23 @@ The board is also an MCP server, so another session — one with a voice mode, o
 your phone — can read the questions and record your answers. It talks; you talk
 back; the grilling session keeps branching on your Mac.
 
-```bash
-# for a session on this machine — no port, no token, no tunnel
-node board.mjs mcp --state ~/.claude/grill-board/<board>/state.json
-```
+**Set it up once.** The gateway is a long-lived front door that serves whichever
+board is *currently* running, so the URL you register never goes stale:
 
 ```bash
-# for one that has to reach the board over a network
-node board.mjs serve --state <path> --token     # POST /mcp, prints the token
+node board.mjs gateway --token          # prints an MCP URL and a token
+cloudflared tunnel --url http://localhost:7799   # or: ngrok http 7799
+```
+
+Register `https://…/mcp?t=<token>` once as a custom connector. Every `serve`
+claims itself as the current board on startup, so from then on you just run
+`/grill-board` as normal and the voice session picks it up — no re-registering,
+no per-board configuration.
+
+For a second session **on the same machine** there's no need for any of that:
+
+```bash
+node board.mjs mcp --state <path>       # MCP over stdio
 ```
 
 Five tools: `list_questions`, `read_question`, `answer`, `ask_better`,

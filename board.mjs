@@ -11,6 +11,7 @@
 //   node board.mjs status --state <path>
 //   node board.mjs export --state <path> [--out transcript.md]
 //   node board.mjs mcp    --state <path>            # MCP over stdio (also at POST /mcp)
+//   node board.mjs gateway [--port N] [--token]     # one stable URL that follows the current board
 
 import { createServer } from 'node:http';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, statSync, renameSync } from 'node:fs';
@@ -20,6 +21,25 @@ import { networkInterfaces, homedir } from 'node:os';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_MAX_OPEN = 8;
+
+// Which board is live right now. Every `serve` claims it, so a long-running
+// gateway — and the connector URL registered against it — follows whatever
+// grill is currently going, instead of being nailed to one session's state file.
+const CURRENT = join(homedir(), '.claude', 'grill-board', 'current');
+
+function setCurrent(p) {
+  try {
+    mkdirSync(dirname(CURRENT), { recursive: true });
+    writeFileSync(CURRENT, `${p}\n`);
+  } catch { /* not worth failing a board over */ }
+}
+
+function getCurrent() {
+  try {
+    const p = readFileSync(CURRENT, 'utf8').trim();
+    return p && existsSync(p) ? p : null;
+  } catch { return null; }
+}
 
 // Viewer preferences (theme, palette) live OUTSIDE any single board. Each board
 // gets its own port, and localStorage is per-origin, so the browser alone would
@@ -316,8 +336,9 @@ const MCP_TOOLS = [
 ];
 
 function mcpRead(p) {
-  const s = peek(p);
-  if (!s) throw new Error('no board at that path yet');
+  const s = p && peek(p);
+  // Spoken aloud, so it says what to do rather than naming a path.
+  if (!s) throw new Error('No grill board is running at the moment. Start one and I will pick it up.');
   return s;
 }
 
@@ -340,9 +361,10 @@ function describeQuestion(q, { full = false } = {}) {
 
 function callTool(p, name, a = {}) {
   if (name === 'list_questions') {
-    const open = mcpRead(p).questions.filter((q) => q.status === 'open');
-    if (!open.length) return 'Nothing open right now — Claude may still be writing more. Try again shortly.';
-    return [`${open.length} open.`, '', ...open.map((q) => describeQuestion(q) + '\n')].join('\n');
+    const s = mcpRead(p);
+    const open = s.questions.filter((q) => q.status === 'open');
+    if (!open.length) return `"${s.title}" — nothing open right now. Claude may still be writing; try again shortly.`;
+    return [`"${s.title}" — ${open.length} open.`, '', ...open.map((q) => describeQuestion(q) + '\n')].join('\n');
   }
   if (name === 'read_question') {
     const q = mcpRead(p).questions.find((x) => x.id === a.id);
@@ -364,7 +386,7 @@ function callTool(p, name, a = {}) {
   if (name === 'board_status') {
     const s = mcpRead(p);
     const c = counts(s);
-    return `${c.answered} answered, ${c.open} open, ${c.queued} still queued.`;
+    return `"${s.title}": ${c.answered} answered, ${c.open} open, ${c.queued} still queued.`;
   }
   throw new Error(`unknown tool: ${name}`);
 }
@@ -474,31 +496,22 @@ function readBody(req) {
   });
 }
 
-async function serve() {
-  const p = statePath();
-  // mutate creates the board if it isn't there, under the lock — so a concurrent
-  // `add` can win the race to create it without either of them losing anything.
-  mutate(p, (cur) => {
-    if (args.title) cur.title = args.title;
-    if (args.subtitle) cur.subtitle = String(args.subtitle);
-    if (args['max-open']) cur.maxOpen = Number(args['max-open']);
-    // Persisted so a restart keeps the same URL — otherwise every restart
-    // invalidates the link already open on a phone.
-    if (args.token) cur.token = args.token === true ? (cur.token || randomToken()) : String(args.token);
-    TOKEN = args.token ? cur.token : null;
-  });
-
-  const host = args.host || '0.0.0.0';
-  const port = await findPort(host, args.port);
+// The request handler, shared by `serve` (one fixed board) and `gateway` (whichever
+// board is current). Resolving the path per request is the whole difference: it lets
+// one tunnelled URL, registered once as a connector, follow every later grill.
+function makeHandler(boardPath) {
   // Read per request rather than once at boot, so editing board.html doesn't
   // need a restart. Only page loads hit this; polling goes to /api/state.
   const html = () => readFileSync(join(HERE, 'board.html'), 'utf8');
 
-  const server = createServer(async (req, res) => {
+  return async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
+    const p = boardPath();
+    if (req.method === 'OPTIONS') { res.writeHead(204, CORS); return res.end(); }
+    if (!authOk(req, url)) return json(res, 401, { ok: false, error: 'unauthorized' });
+    // /mcp speaks for itself when nothing is live; every other route needs a board.
+    if (!p && url.pathname !== '/mcp') return json(res, 503, { ok: false, error: 'no grill board is running' });
     try {
-      if (req.method === 'OPTIONS') { res.writeHead(204, CORS); return res.end(); }
-      if (!authOk(req, url)) return json(res, 401, { ok: false, error: 'unauthorized' });
 
       // MCP, for a client that talks to the board instead of looking at it.
       if (url.pathname === '/mcp') {
@@ -598,7 +611,29 @@ async function serve() {
     } catch (e) {
       json(res, 500, { ok: false, error: e.message });
     }
+  };
+}
+
+async function serve() {
+  const p = statePath();
+  // mutate creates the board if it isn't there, under the lock — so a concurrent
+  // `add` can win the race to create it without either of them losing anything.
+  mutate(p, (cur) => {
+    if (args.title) cur.title = args.title;
+    if (args.subtitle) cur.subtitle = String(args.subtitle);
+    if (args['max-open']) cur.maxOpen = Number(args['max-open']);
+    // Persisted so a restart keeps the same URL — otherwise every restart
+    // invalidates the link already open on a phone.
+    if (args.token) cur.token = args.token === true ? (cur.token || randomToken()) : String(args.token);
+    TOKEN = args.token ? cur.token : null;
   });
+
+  // Claim the voice gateway. The newest board is the one you talk to.
+  setCurrent(p);
+
+  const host = args.host || '0.0.0.0';
+  const port = await findPort(host, args.port);
+  const server = createServer(makeHandler(() => p));
 
   server.listen(port, host, () => {
     const lan = lanAddress();
@@ -783,6 +818,32 @@ function cmdExport() {
 
 // ---------------------------------------------------------------- dispatch
 
+// A long-lived front door that serves whichever board is CURRENT rather than
+// one fixed one. Tunnel this once and register the connector once; every later
+// grill is reachable at the same URL. The alternative is re-registering a
+// connector every session, which nobody sustains.
+async function cmdGateway() {
+  const prefs = loadPrefs();
+  if (args.token) {
+    prefs.gatewayToken = args.token === true ? (prefs.gatewayToken || randomToken()) : String(args.token);
+    savePrefs(prefs);
+    TOKEN = prefs.gatewayToken;
+  }
+  const host = args.host || '127.0.0.1';
+  const port = await findPort(host, args.port || 7799);
+  const server = createServer(makeHandler(getCurrent));
+  server.listen(port, host, () => {
+    const q = TOKEN ? `?t=${TOKEN}` : '';
+    process.stdout.write('grill-board gateway listening\n');
+    process.stdout.write(`  mcp     http://localhost:${port}/mcp${q}\n`);
+    process.stdout.write(`  board   http://localhost:${port}/${q}\n`);
+    if (TOKEN) process.stdout.write(`  token   ${TOKEN}\n`);
+    process.stdout.write(`  current ${getCurrent() || '(nothing running yet)'}\n`);
+    process.stdout.write('  follows whichever board is serving — start one and it appears here.\n');
+  });
+  await new Promise(() => {});
+}
+
 // MCP over stdio, for a second session on this machine — no port, no token,
 // no tunnel. The HTTP transport at /mcp is for one that has to reach across a
 // network; both call the same handleRpc.
@@ -809,11 +870,11 @@ async function cmdMcp() {
 
 const verbs = {
   serve, add: cmdAdd, new: cmdNew, watch: cmdWatch, retire: cmdRetire,
-  note: cmdNote, status: cmdStatus, export: cmdExport, mcp: cmdMcp,
+  note: cmdNote, status: cmdStatus, export: cmdExport, mcp: cmdMcp, gateway: cmdGateway,
 };
 
 if (!cmd || !verbs[cmd]) {
-  process.stderr.write('usage: board.mjs <serve|add|new|watch|retire|note|status|export|mcp> --state <path>\n');
+  process.stderr.write('usage: board.mjs <serve|add|new|watch|retire|note|status|export|mcp|gateway> --state <path>\n');
   process.exit(1);
 }
 await verbs[cmd]();
