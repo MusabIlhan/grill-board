@@ -538,6 +538,7 @@
       <dt><kbd>↵</kbd></dt><dd>Send — or reopen an answered card</dd>
       <dt><kbd>C</kbd></dt><dd>Jump straight to writing your own (<kbd>esc</kbd> to leave, <kbd>⌘↵</kbd> to send)</dd>
       <dt><kbd>X</kbd></dt><dd>You decide — defer to Claude's pick</dd>
+      <dt><kbd>T</kbd></dt><dd>Ask me simpler — this one is too dense to answer</dd>
       <dt><kbd>R</kbd></dt><dd>Push back: tell Claude the question is wrong</dd>
       <dt><kbd>E</kbd></dt><dd>Show or hide Claude's take</dd>
 
@@ -664,6 +665,11 @@
   const expanded = new Set();  // answered cards the user re-opened
   const openTakes = new Set(); // qids with "Claude's take" expanded
   const optCursor = new Map(); // qid -> index of the highlighted option
+  // Selections made by *moving* through the list, as a native radio group does.
+  // They are provisional: passing over a choice is not choosing it, so they are
+  // dropped when you leave. A pick made deliberately — space, a number key, a
+  // click — is not in here and survives.
+  const provisional = new Set();
   let inflight = new Set();
   let lastHtml = '';
 
@@ -823,19 +829,24 @@
     // enough to accept Claude's pick. The note row is entered, not taken.
     if (i !== noteIdx(q) && !q.multi) {
       const btn = card.querySelectorAll('[data-pick]')[i];
-      if (btn) btn.click();
+      if (btn) { btn.click(); provisional.add(q.id); } // add AFTER: the click clears it
     }
     paintFocus();
     repaintOptions(q.id);
   }
 
+  // Drop a selection that only exists because the cursor passed over it.
+  // The typed draft is never touched — that is content you wrote.
+  function dropProvisional(qid) {
+    if (!provisional.has(qid)) return;
+    provisional.delete(qid);
+    sel.delete(qid);
+  }
+
   function exitOptions() {
-    // Stepping back out means "never mind". A choice you only moved through on
-    // the way past is not an answer, so it must not linger looking like one.
-    // The typed draft is left alone — that is content you wrote, not a cursor.
     const q = focusedQ();
     if (q) {
-      sel.delete(q.id);
+      dropProvisional(q.id);
       optCursor.delete(q.id);
     }
     focusLevel = 'card';
@@ -859,11 +870,15 @@
     const cur = cursorIdx(q);
     const i = Math.min(noteIdx(q), Math.max(0, (cur < 0 ? entryIdx(q) : cur) + delta));
     optCursor.set(q.id, i);
-    // One answer allowed: moving IS choosing, as in a native radio group.
-    // Several allowed: moving only highlights, and space toggles.
-    if (i !== noteIdx(q) && !q.multi) {
+    if (i === noteIdx(q)) {
+      // Reaching "write your own" means you are not picking from the list, so a
+      // choice the cursor merely passed over must not stay looking chosen.
+      dropProvisional(q.id);
+    } else if (!q.multi) {
+      // One answer allowed: moving IS choosing, as in a native radio group.
+      // Several allowed: moving only highlights, and space toggles.
       const btn = card.querySelectorAll('[data-pick]')[i];
-      if (btn) btn.click();
+      if (btn) { btn.click(); provisional.add(q.id); }
     }
     repaintOptions(q.id);
   }
@@ -1064,6 +1079,7 @@
       <h3 class="q-title">${esc(q.title)}</h3>
       ${q.context ? `<div class="prose">${md(q.context)}</div>` : ''}
       ${q.pushback ? `<div class="pushback-note">You pushed back: “${esc(q.pushback.text)}” — Claude is revising.</div>` : ''}
+      ${q.simpler ? '<div class="pushback-note">You asked for this one simpler — Claude is rewriting it.</div>' : ''}
       ${q.recommendation ? `<details class="take" data-take="${q.id}"><summary>Claude's take</summary><div class="prose">${md(q.recommendation)}</div></details>` : ''}
       ${opts ? `<div class="options">${opts}</div>` : ''}
       <div class="own ${ci === q.options.length ? 'cursor' : ''}">
@@ -1072,6 +1088,7 @@
       <div class="actions">
         <button class="send" data-send="${q.id}" ${picked.size || draft.trim() ? '' : 'disabled'}>Send</button>
         <button class="link" data-skip="${q.id}">You decide</button>
+        <button class="link" data-simpler="${q.id}">Ask me simpler</button>
         <button class="link" data-push="${q.id}">Push back</button>
         <span class="hint">${q.options.length ? '↑↓ move · → into choices · ↵ send · ? keys' : '↑↓ move · → to write · ↵ send · ? keys'}</span>
       </div>
@@ -1121,6 +1138,9 @@
         // between the two mid-card doesn't jump the highlight somewhere else.
         const idx = q.options.findIndex((o) => o.key === key);
         if (idx >= 0) optCursor.set(qid, idx);
+        // A click is a deliberate pick, not a cursor passing through, so it is
+        // never provisional. Callers that move the cursor re-add it afterwards.
+        provisional.delete(qid);
         // Clicking a choice means you are working inside that card, so the
         // keyboard picks up where the mouse left off rather than somewhere else.
         focusedQid = qid;
@@ -1150,6 +1170,7 @@
         const q = questions.find((x) => x.id === ta.dataset.own);
         if (!q) return;
         optCursor.set(q.id, noteIdx(q));
+        dropProvisional(q.id); // writing your own is not picking from the list
         focusedQid = q.id;
         focusLevel = 'option';
         paintFocus();
@@ -1163,13 +1184,14 @@
     // Keep focus in the textarea through the whole press. Without this the
     // textarea blurs on mousedown, and any resulting reflow can move the button
     // before mouseup — so the click is swallowed and you have to press twice.
-    feed.querySelectorAll('[data-send],[data-skip],[data-push]').forEach((b) => {
+    feed.querySelectorAll('[data-send],[data-skip],[data-push],[data-simpler]').forEach((b) => {
       b.onmousedown = (e) => e.preventDefault();
     });
 
     feed.querySelectorAll('[data-send]').forEach((b) => { b.onclick = () => send(b.dataset.send); });
     feed.querySelectorAll('[data-skip]').forEach((b) => { b.onclick = () => skip(b.dataset.skip); });
     feed.querySelectorAll('[data-push]').forEach((b) => { b.onclick = () => pushback(b.dataset.push); });
+    feed.querySelectorAll('[data-simpler]').forEach((b) => { b.onclick = () => simpler(b.dataset.simpler); });
     feed.querySelectorAll('[data-open]').forEach((c) => {
       c.onclick = () => { expanded.add(c.dataset.open); render(); };
     });
@@ -1208,6 +1230,13 @@
     expanded.delete(qid);
     render();
     try { await post('/api/skip', { id: qid }); lastRev = null; } catch { setOffline(true); }
+  }
+
+  async function simpler(qid) {
+    const q = questions.find((x) => x.id === qid);
+    if (q) q.simpler = { at: null };
+    render();
+    try { await post('/api/simpler', { id: qid }); lastRev = null; } catch { setOffline(true); }
   }
 
   async function pushback(qid) {
@@ -1521,6 +1550,7 @@
       // calling focus() on an already-focused field fires nothing, and then
       // esc + ↑ would walk back from the wrong place.
       optCursor.set(qid, noteIdx(q));
+      dropProvisional(qid);
       focusLevel = 'option';
       ta.focus();
       autosize(ta);
@@ -1529,6 +1559,7 @@
       return;
     }
     if (lower === 'x' && !answered) { stop(); skip(qid); return; }
+    if (lower === 't' && !answered) { stop(); simpler(qid); return; }
     if (lower === 'r' && !answered) { stop(); pushback(qid); return; }
     if (lower === 'e') {
       const d = card.querySelector('[data-take]');

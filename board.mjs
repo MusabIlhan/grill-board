@@ -348,6 +348,18 @@ async function serve() {
         return json(res, out.ok ? 200 : 404, out);
       }
 
+      if (req.method === 'POST' && url.pathname === '/api/simpler') {
+        const body = await readBody(req);
+        const out = mutate(p, (cur) => {
+          const q = cur.questions.find((x) => x.id === body.id);
+          if (!q) return { ok: false, error: 'unknown question' };
+          q.simpler = { at: new Date().toISOString() };
+          pushEvent(cur, { type: 'simpler', id: q.id, thread: q.thread, title: q.title });
+          return { ok: true };
+        });
+        return json(res, out.ok ? 200 : 404, out);
+      }
+
       if (req.method === 'POST' && url.pathname === '/api/reopen') {
         const body = await readBody(req);
         const out = mutate(p, (cur) => {
@@ -432,6 +444,7 @@ function describe(ev) {
   }
   if (ev.type === 'skip') return `[skip] ${ev.id} (${ev.thread})`;
   if (ev.type === 'pushback') return `[pushback] ${ev.id} (${ev.thread}) ${JSON.stringify(String(ev.text).slice(0, 160))}`;
+  if (ev.type === 'simpler') return `[simpler] ${ev.id} (${ev.thread}) too complex — re-ask it plainly`;
   if (ev.type === 'message') return `[message] ${JSON.stringify(String(ev.text).slice(0, 160))}`;
   return `[${ev.type}] ${ev.id || ''}`;
 }
@@ -543,6 +556,7 @@ function cmdExport() {
         lines.push('**Unanswered**');
       }
       if (q.pushback) lines.push(`**Pushback:** ${q.pushback.text}`);
+      if (q.simpler) lines.push('**Asked for simpler.**');
       lines.push('');
     }
   }

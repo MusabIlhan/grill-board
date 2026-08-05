@@ -56,11 +56,19 @@ cards  ──→──  that card's choices  ──→──  typing your own
 | <kbd>1</kbd>–<kbd>9</kbd> | Pick a choice directly |
 | <kbd>space</kbd> | Take the highlighted choice — from the card level, Claude's pick |
 | <kbd>↵</kbd> | Send, or reopen an answered card |
-| <kbd>C</kbd> <kbd>X</kbd> <kbd>R</kbd> <kbd>E</kbd> | Write your own · you decide · push back · Claude's take |
+| <kbd>C</kbd> <kbd>X</kbd> <kbd>T</kbd> <kbd>R</kbd> <kbd>E</kbd> | Write your own · you decide · ask me simpler · push back · Claude's take |
 | <kbd>M</kbd> <kbd>L</kbd> <kbd>P</kbd> | Tell Claude something · light/dark · palette |
 
+Three ways to answer without answering, and they mean different things:
+**You decide** defers to Claude's pick. **Ask me simpler** says the question was
+too dense to answer — it gets re-asked in plain words, or split, without losing
+the detail that made it decidable. **Push back** says the question itself was
+*wrong*, and it gets retired and re-asked rather than defended.
+
 A card you're merely passing over never shows a highlighted choice — a highlight
-you didn't put there reads as a decision already made for you.
+you didn't put there reads as a decision already made for you. Choices you move
+through are provisional and vanish when you leave or start writing your own; one
+you actually pick (space, a number, a click) stays, so "option 2, but…" works.
 
 **Push back** is the one worth knowing about: it tells the session the *question*
 is wrong, and it retires and re-asks rather than defending it.

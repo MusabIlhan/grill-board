@@ -99,6 +99,7 @@ For each event:
 | `answer` | Branch: 0–3 follow-ups **in that thread** if real ambiguity remains. Then re-read every *other* open card — retire any the answer just made moot, and revise any it contradicts. |
 | `skip` | They deferred to your recommendation. Record it as decided-by-you and move that thread on. |
 | `pushback` | The question was wrong. Retire it and re-ask it properly — do not defend it. |
+| `simpler` | The question was unanswerable as written — too dense, too much jargon, too many things at once. Retire it and ask the **same decision** again in plain words, splitting it if it was really two questions. Do not just shorten it, and do not drop the detail that made it decidable. |
 | `message` | Steering. Obeys immediately, even if it means retiring a whole thread. |
 
 Then set the liveness note, post new cards, and **end your turn again**:
