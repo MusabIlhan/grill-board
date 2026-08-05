@@ -535,8 +535,9 @@
       <div class="sect">Answering</div>
       <dt><kbd>1</kbd>–<kbd>9</kbd></dt><dd>Pick a choice directly</dd>
       <dt><kbd>space</kbd></dt><dd>Take the highlighted choice</dd>
-      <dt><kbd>↵</kbd></dt><dd>Send — or reopen an answered card</dd>
-      <dt><kbd>C</kbd></dt><dd>Jump straight to writing your own (<kbd>esc</kbd> to leave, <kbd>⌘↵</kbd> to send)</dd>
+      <dt><kbd>⌘↵</kbd></dt><dd>Send — the same key on a choice as in the text</dd>
+      <dt><kbd>↵</kbd></dt><dd>Reopen an answered card</dd>
+      <dt><kbd>C</kbd></dt><dd>Jump straight to writing your own (<kbd>esc</kbd> to leave)</dd>
       <dt><kbd>X</kbd></dt><dd>You decide — defer to Claude's pick</dd>
       <dt><kbd>T</kbd></dt><dd>Ask me simpler — this one is too dense to answer</dd>
       <dt><kbd>R</kbd></dt><dd>Push back: tell Claude the question is wrong</dd>
@@ -1090,7 +1091,7 @@
         <button class="link" data-skip="${q.id}">You decide</button>
         <button class="link" data-simpler="${q.id}">Ask me simpler</button>
         <button class="link" data-push="${q.id}">Push back</button>
-        <span class="hint">${q.options.length ? '↑↓ move · → into choices · ↵ send · ? keys' : '↑↓ move · → to write · ↵ send · ? keys'}</span>
+        <span class="hint">${q.options.length ? '↑↓ move · → into choices · ⌘↵ send · ? keys' : '↑↓ move · → to write · ⌘↵ send · ? keys'}</span>
       </div>
     </div></div>`;
   }
@@ -1464,6 +1465,15 @@
       return;
     }
     if (typing || dlg.open || helpDlg.open) return;
+
+    // ⌘↵ / ctrl↵ is the send, and it is the SAME gesture the note field uses.
+    // Committing should not depend on whether the cursor happens to be sitting
+    // on a choice or in the text — one key sends either way.
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      const el = focusedQid ? feed.querySelector(`[data-qid="${focusedQid}"]`) : null;
+      if (el && !el.classList.contains('done')) { e.preventDefault(); send(focusedQid); }
+      return;
+    }
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (!pop.hidden && e.key.toLowerCase() !== 'p' && e.key !== ',') return; // picker open: only Esc and p
 
@@ -1535,9 +1545,9 @@
       return;
     }
     if (k === 'Enter') {
-      stop();
-      if (answered) { expanded.add(qid); render(); setFocus(qid, { scroll: false }); }
-      else send(qid);
+      // Reopening is not a send, so it stays on plain ↵. An unanswered card
+      // does nothing here: committing is ⌘↵, on a choice as much as in text.
+      if (answered) { stop(); expanded.add(qid); render(); setFocus(qid, { scroll: false }); }
       return;
     }
     if (lower === 'c') {

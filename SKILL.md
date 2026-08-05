@@ -71,8 +71,8 @@ URL existing. Two or three is plenty.
 
 Then hand over the URL — `cat "$(dirname "$S")/url"` gives the local one and the
 LAN one, and the board answers fine from a phone. Say once that the board is
-fully keyboard-driven: arrows or `WASD` (up/down between cards, left/right
-between choices), `↵` to send, `?` for the rest.
+fully keyboard-driven: arrows or `WASD` move, `→` steps into a card's choices
+and `←` back out, `⌘↵` sends, `?` lists the rest.
 
 **3. Now explore, appending as you write.** Read the plan, diff, spec or code.
 Anything the codebase can answer, answer by reading it — never spend a card on

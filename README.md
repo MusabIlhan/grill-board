@@ -55,7 +55,8 @@ cards  ──→──  that card's choices  ──→──  typing your own
 | <kbd>N</kbd> | Next unanswered |
 | <kbd>1</kbd>–<kbd>9</kbd> | Pick a choice directly |
 | <kbd>space</kbd> | Take the highlighted choice — from the card level, Claude's pick |
-| <kbd>↵</kbd> | Send, or reopen an answered card |
+| <kbd>⌘↵</kbd> | Send — the same key on a choice as in the text |
+| <kbd>↵</kbd> | Reopen an answered card |
 | <kbd>C</kbd> <kbd>X</kbd> <kbd>T</kbd> <kbd>R</kbd> <kbd>E</kbd> | Write your own · you decide · ask me simpler · push back · Claude's take |
 | <kbd>M</kbd> <kbd>L</kbd> <kbd>P</kbd> | Tell Claude something · light/dark · palette |
 
