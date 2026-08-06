@@ -1,6 +1,6 @@
 ---
 name: grill-board
-description: Grill the user on a plan, design or spec through a live web board instead of one blocking question at a time. Posts a batch of roomy, self-contained questions they answer in any order at their own pace; each answer wakes the session to branch follow-ups into that thread while they keep answering the rest. Use when the user says "grill-board", "grill me in parallel", "batch grill me", or wants a plan stress-tested without being blocked on one question at a time.
+description: Reach agreement on a plan, design, spec — or on how a change is actually going to be written — through a live web board instead of one blocking question at a time. Posts roomy, self-contained questions answered in any order; each answer wakes the session to branch follow-ups while the rest stay answerable. For a bug or a change it diagnoses first and then grills on the implementation forks, so the user is in the code decision rather than describing the problem. Use when the user says "grill-board", "grill me in parallel", "batch grill me", or prefixes a task with it ("grill-board fix the retry loop"), or wants a plan stress-tested without being blocked one question at a time.
 ---
 
 # grill-board
@@ -126,6 +126,59 @@ node ~/.claude/skills/grill-board/board.mjs export --state "$S" --out decisions.
 Write, in the conversation: the decisions reached (with who decided — them or
 you-by-default), the ones still genuinely open, and what you now recommend
 building. Offer to stop the server.
+
+If the subject was a change rather than a plan, the payoff is the implementation
+itself — see below — and the offer is to write it, not to stop.
+
+## When the subject is a change, not a plan
+
+`/grill-board fix the outbox retry` is **not** a request to describe the bug back
+to them. They already know the symptom — they want to be in the *code decision*.
+
+**Diagnose first, and silently.** Reproduce it, read the code, find the actual
+cause. Never spend a card asking where the bug is, what the error said, or how to
+reproduce it: if the repo can answer that, answering it is your job, not theirs.
+Arriving with *"found it — the retry loop treats every failure as transient,
+`outbox.ts:112`"* and only **then** asking how to fix it is the entire point.
+
+**The cards are about the fix, not the fault.** Every one is a real fork in the
+implementation with the actual code in it. What genuinely needs them:
+
+| | |
+|---|---|
+| **Cause or symptom** | The real cause is two layers down. Fix it there, or contain it here? Different blast radius, different risk of a second bug. |
+| **Blast radius** | The honest fix changes a function with other callers. Change it, fork it, or wrap it — and who gets re-tested. |
+| **The behaviour nobody chose** | Many bugs exist because no one ever decided what *should* happen. That decision is theirs, not yours. |
+| **Scope** | This instance, or the class of it? Say plainly what else is broken the same way, and let them decide. |
+| **Proof and repair** | What test pins it so it cannot come back — and whether data already written wrong needs fixing too. |
+
+Never ask "shall I fix it?" — that is what they asked for. Ask **how**.
+
+Cards that need no reading, so the board is useful in seconds: how much this is
+worth spending (a patch today or the right fix), whether they already suspect a
+cause, and whether changing the current behaviour is even allowed.
+
+Finish differently too. For a change the payoff is **the implementation you are
+about to write** — the files, the seam, the order, the test — then offer to
+write it.
+
+A fix-shaped card looks like this. Note that it arrives already knowing the
+cause, and that the choices are three implementations, not three theories:
+
+```json
+{
+  "thread": "Outbox",
+  "title": "A 4xx retries forever. Fix it at the classifier or at the queue?",
+  "spoken": "I found it — the retry loop treats every failure as temporary, so a permanent 4xx never stops. There are two places to fix that. Do you want the queue to decide when to give up, or the thing that reads the response to say up front whether it is worth retrying?",
+  "context": "```ts\n// backend/src/sync/outbox.ts:112\ncatch (e) { await sleep(backoff); return retry(job); }   // no terminal case\n```\n\nA 401 and a CHECK violation both land here, and neither can ever succeed.\n\n| | at the classifier | at the queue |\n|---|---|---|\n| touches | `classifyError` — 3 callers | `outbox.ts` only |\n| fixes the class | yes, everywhere | this queue only |\n| re-test | all 3 callers | the outbox |",
+  "recommendation": "Classifier. The other two callers have the same latent bug, and a retryable/terminal split is the thing that was actually missing.",
+  "options": [
+    { "label": "Split retryable vs terminal in classifyError", "detail": "Fixes the class. Re-tests 3 callers.", "recommended": true },
+    { "label": "Give the outbox a max-attempts cap", "detail": "Smallest diff, contained. The other callers stay broken and 401 still burns the cap." },
+    { "label": "Cap now, classifier next week", "detail": "Unblocks today. The follow-up is the one that never happens." }
+  ]
+}
+```
 
 ## Writing a good card
 

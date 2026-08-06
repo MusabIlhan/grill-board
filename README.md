@@ -14,6 +14,12 @@ seed a batch ──► you answer any card ──► the session wakes ──►
      └──────────────── new cards appear live ◄────────────────────────--┘
 ```
 
+It works on a change as well as a plan. `/grill-board fix the retry loop`
+diagnoses first, then asks about the **implementation forks** — fix the cause or
+contain the symptom, change a shared function or fork it, this instance or the
+class — with the actual code in each card. You end up in the code decision
+instead of describing the bug.
+
 Two things make it different from a chat prompt:
 
 - **You are never blocked.** Questions queue on a board, not in the conversation.
