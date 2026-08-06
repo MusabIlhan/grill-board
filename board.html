@@ -454,6 +454,23 @@
   .step.failed .mark { color: var(--danger); }
   .step .from { margin-left: auto; padding-left: 12px; flex: none; font-size: 11px; color: var(--ink-3); }
   .step .note { color: var(--ink-3); font-size: 12.5px; }
+  /* Who is holding this step right now. Reads as a name, not a status: with
+     three agents on one build, "which one is stuck" is the question you ask. */
+  .step .who {
+    flex: none; font-size: 10.5px; font-weight: 600; letter-spacing: .02em;
+    padding: 1px 7px; border-radius: 99px; margin-left: 8px;
+    color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warn) 38%, transparent);
+  }
+  .step.done .who { color: var(--ink-3); background: var(--panel-2); border-color: var(--line); }
+  .step .waits { flex: none; font-size: 11px; color: var(--ink-3); margin-left: 8px; }
+  .crew { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 18px 13px; }
+  .crew .who {
+    font-size: 11px; padding: 2px 9px; border-radius: 99px;
+    border: 1px solid var(--line-2); color: var(--ink-2); background: var(--panel-2);
+  }
+  .crew .who.busy { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 38%, transparent); }
+  .crew .who b { font-weight: 600; }
 
   /* A review card is not a question — it is code that already exists. The rail
      says so at a glance, so a diff is never mistaken for a proposal. */
@@ -737,6 +754,7 @@
   let phase = 'grilling';
   let build = null;
   let changes = [];
+  let workers = {};       // name -> { lastSeen, note } for agents sharing the build
   let buildOpen = null;        // null = follow the phase; true/false once toggled
   let lastRev = null;
   let seenIds = new Set();
@@ -846,6 +864,7 @@
     phase = s.phase || 'grilling';
     build = s.build || null;
     changes = s.changes || [];
+    workers = s.workers || {};
     const pill = document.getElementById('phase');
     pill.hidden = phase === 'grilling';
     pill.className = `phase ${phase}`;
@@ -861,6 +880,14 @@
     return changes.filter((c) => (c.because || []).includes(qid));
   }
 
+  // Only worth showing when more than one agent worked the build — on a solo
+  // build the name is noise on every single card.
+  function changeAuthor(cid) {
+    if (Object.keys(workers).length < 2) return null;
+    const c = changes.find((x) => x.id === cid);
+    return c && c.author ? c.author : null;
+  }
+
   const MARK = { done: '✓', running: '◐', failed: '✕', pending: '·' };
 
   function buildPanel() {
@@ -871,17 +898,39 @@
     // Open while it is happening; folded once it is history and the review
     // cards below are the thing to look at.
     const open = buildOpen === null ? phase !== 'review' : buildOpen;
+    const crew = Object.keys(workers);
     const head = phase === 'review'
       ? `Built — ${steps.length} step${steps.length === 1 ? '' : 's'}, ${changes.length} change${changes.length === 1 ? '' : 's'}`
-      : 'Building what you decided';
+      : crew.length > 1 ? `Building what you decided — ${crew.length} agents` : 'Building what you decided';
+    // A step still waiting on another is not idle, it is blocked. Saying which
+    // one keeps a queue that has stalled from looking like one that is slow.
+    const doneIds = new Set(steps.filter((x) => x.status === 'done').map((x) => x.id));
+    const waitsOn = (st) => (st.needs || []).filter((n) => !doneIds.has(n));
     return `<details class="build" id="buildPanel" ${open ? 'open' : ''}>
       <summary>${esc(head)}<span class="tally">${done}/${steps.length}${failed ? ` · ${failed} failed` : ''}</span></summary>
-      <div class="steps">${steps.map((st) => `
-        <div class="step ${esc(st.status)}">
+      <div class="steps">${steps.map((st) => {
+        const w = st.owner || (st.status === 'done' ? st.doneBy : null);
+        const blocked = st.status === 'pending' ? waitsOn(st) : [];
+        return `<div class="step ${esc(st.status)}">
           <span class="mark">${MARK[st.status] || '·'}</span>
           <span>${esc(st.title)}${st.note ? ` <span class="note">— ${esc(st.note)}</span>` : ''}</span>
+          ${w ? `<span class="who">${esc(w)}</span>` : ''}
+          ${blocked.length ? `<span class="waits">waits on ${esc(blocked.join(', '))}</span>` : ''}
           ${(st.because || []).length ? `<span class="from">${esc(st.because.join(' '))}</span>` : ''}
-        </div>`).join('')}</div>
+        </div>`;
+      }).join('')}</div>
+      ${crew.length > 1 ? `<div class="crew">${crew.map((n) => {
+        const on = steps.filter((x) => x.owner === n).map((x) => x.id);
+        // Mid-build, "idle" is the useful word — it says this agent holds
+        // nothing and something can be handed to it. Once the build is over
+        // every agent is idle by definition, and a roster of "idle" under four
+        // finished steps reads as though nobody did any of them. So past the
+        // build the roster stops reporting holdings and reports work.
+        const ran = phase === 'review' ? steps.filter((x) => x.doneBy === n).map((x) => x.id) : [];
+        const label = phase === 'review' ? esc(ran.join(',')) : on.length ? esc(on.join(',')) : 'idle';
+        return `<span class="who ${on.length ? 'busy' : ''}" title="${esc(workers[n].note || '')}">
+          <b>${esc(n)}</b> ${label}</span>`;
+      }).join('')}</div>` : ''}
     </details>`;
   }
 
@@ -1216,7 +1265,7 @@
     return `<div class="${cls.join(' ')}" id="card-${q.id}" data-qid="${q.id}"><div class="card-body">
       <div class="card-meta">
         ${isNew ? '<span class="chip new">new</span>' : ''}
-        ${q.kind === 'review' ? `<span class="chip built">written · ${esc(q.changeId || '')}</span>` : ''}
+        ${q.kind === 'review' ? `<span class="chip built">${esc(changeAuthor(q.changeId) || 'written')} · ${esc(q.changeId || '')}</span>` : ''}
         <span class="chip">${esc(q.thread)}</span>
         <span class="qid">${q.id}${q.multi ? ' · pick any' : ''}</span>
       </div>

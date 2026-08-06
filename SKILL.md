@@ -160,6 +160,11 @@ Every step names the questions that produced it. A step that traces back to no
 answer is a step nobody asked for — either it is groundwork (fine, say so) or
 you are building something they did not agree to.
 
+Two optional fields on a step decide whether the build can be shared:
+`needs: ["s1"]` for what must finish first, and `files: [...]` for what it
+expects to touch. Alone you can skip both. With several agents they are the
+difference between parallel and merely simultaneous.
+
 **2. Mark each step as you reach it**, never in a batch at the end. The panel is
 the only sign anything is happening.
 
@@ -200,6 +205,73 @@ A verdict with free text is the normal case, and the text outranks the button.
 
 **6. `[reviewed]` means every change has a verdict.** Export the record and say
 what stands. Offer to commit; do not commit unasked.
+
+## Splitting the build across several agents
+
+A build of more than three or four independent steps is worth fanning out. The
+board is the work queue: agents claim steps from it, and **the claim is what
+keeps them off each other.**
+
+Every agent needs a name — `--as <name>` — and it must be one word that says
+what it is doing (`outbox`, `backfill`, `docs`), never `agent2`. It appears on
+the board next to the step it is holding and on every change it writes, and the
+first question you will be asked is "which one is stuck".
+
+**The lead** drains the grill, posts the plan with `needs` and `files` on every
+step, then spawns one subagent per parallel track and stops. It does not claim
+anything itself. Its watch stays unfiltered, so it still sees the whole board.
+
+**Each worker** runs this loop, and nothing else:
+
+```bash
+B=~/.claude/skills/grill-board/board.mjs
+node $B claim --state "$S" --as outbox        # exit 3 = wait, 0 with no step = done
+# ... do exactly that step, nothing outside it ...
+node $B change --state "$S" --as outbox --file /tmp/c.json
+node $B build  --state "$S" --as outbox --step s1 --status done --note "3 callers re-tested"
+```
+
+`claim` takes **one** step, atomically. Two agents cannot hold the same one —
+the pick and the mark happen inside the same lock as every other write. What
+comes back tells you what to do next:
+
+| | |
+|---|---|
+| a step | It is yours. Do that step and nothing else. |
+| exit 3 | Nothing takeable *yet* — it prints who holds what and what waits on what. Something is still running, so wait and claim again. |
+| exit 0, no step | Every step is done. Stop; the loop is over. |
+| `OVERLAP` on stderr | Another live step declares a file you also declared. It is a warning, not a refusal, because plans guess at their file lists — go and look before you write. |
+
+**Never work a step you did not claim.** Not "while I'm in that file anyway",
+not "it was obviously next". The queue is the only thing preventing two agents
+from writing the same file, and it only works if nobody reaches around it.
+
+A step held by an agent that died blocks the queue. `claim` will not take it
+automatically — silently stealing work from an agent that is merely slow is how
+you get two writers in one file. It tells you who holds it and for how long;
+`--steal s3` takes it deliberately, and says so on the board.
+
+Release what you cannot finish, rather than holding it:
+
+```bash
+node $B release --state "$S" --as outbox --step s3 --failed --reason "needs a decision we never made"
+```
+
+**Draining events is per agent.** Pass `--as` to `new` and `watch` and each
+agent gets its own cursor — without it they share one, and whoever calls first
+swallows everyone else's wake:
+
+```
+Monitor({ command: 'node ~/.claude/skills/grill-board/board.mjs watch --state "$S" --as outbox --mine',
+          description: 'verdicts on outbox changes', persistent: true })
+```
+
+`--mine` narrows a worker to what it must act on: verdicts on changes **it**
+wrote, plus messages. Everything else — grill answers, the drain lines — is the
+lead's. Workers use `--mine`; the lead never does.
+
+So a `change the code` verdict wakes exactly the agent that wrote that change,
+which is the one that still knows why.
 
 ### Writing a change entry
 
@@ -356,6 +428,12 @@ thread ends when the next question would not change what gets built.
 - The server binds `0.0.0.0` so a phone on the LAN can answer. Pass
   `--host 127.0.0.1` to keep it on the machine.
 - Ports auto-select from 7800 upward, so concurrent sessions do not collide.
+- **Give `$S` a state path nothing else will pick.** The date and topic slug
+  collide when two sessions grill the same subject on one day, and two grills
+  sharing a state file used to merge silently into one board. `serve` now
+  refuses that — if it tells you a different grill is already there, choose a
+  new path. `--adopt` joins an existing board on purpose, which is only ever
+  what you want when you *are* the second agent on one build.
 
 ## Command reference
 
@@ -371,7 +449,10 @@ thread ends when the next question would not change what gets built.
 | `note --state P --text T` | set the liveness line shown in the header |
 | `status --state P` | counts, phase, build progress, every change and its verdict |
 | `export --state P [--out F]` | the record: decisions, what each one produced, the build, every change with its diff and verdict |
-| `build --state P --file F` | declare the build; the board flips to `building` and shows the steps |
-| `build --state P --step s2 --status running\|done\|failed [--note N]` | move one step |
-| `change --state P --file F` | log built changes (JSON array). Re-logging with an existing `id` rewrites it and reopens its review |
+| `build --state P --file F` | declare the build; the board flips to `building` and shows the steps. Steps take `needs` and `files` |
+| `build --state P --step s2 --status running\|done\|failed [--note N] [--as W]` | move one step. Only its holder may, unless `--force` |
+| `change --state P --file F [--as W]` | log built changes (JSON array). Re-logging with an existing `id` rewrites it and reopens its review |
 | `review --state P` | turn every unreviewed change into a card, with its decisions attached |
+| `claim --state P --as W [--step s3] [--steal s3]` | take one step, exclusively. Exit 3 = wait, exit 0 with no step = the build is done |
+| `release --state P --as W [--step s3] [--failed] [--reason R]` | hand a step back |
+| `new`/`watch --as W [--mine]` | that agent's own event cursor; `--mine` narrows a worker to verdicts on what it wrote |

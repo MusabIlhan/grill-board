@@ -319,7 +319,58 @@ function ensureWork(s) {
   if (!s.build) s.build = { startedAt: null, finishedAt: null, steps: [] };
   if (!Array.isArray(s.changes)) s.changes = [];
   if (!s.nextChange) s.nextChange = 1;
+  if (!s.workers) s.workers = {};
+  if (!s.cursors) s.cursors = {};
   return s;
+}
+
+// ------------------------------------------------------------- who is here
+// A build can be shared by several agents, so every write carries a name. An
+// unattributed change is one nobody can be asked about later — and with three
+// agents on one board, "who decided to do it that way" stops being rhetorical.
+//
+// The host session id distinguishes separate Claude Code sessions for free, but
+// subagents inside ONE session all inherit it — so it can only ever be a
+// fallback. Anything that takes work has to say who it is out loud.
+function whoami({ required = false } = {}) {
+  const explicit = args.as && args.as !== true ? String(args.as).trim().slice(0, 24) : null;
+  if (explicit) return explicit;
+  if (required) die('missing --as <name> — every agent sharing a board needs one');
+  const host = process.env.CLAUDE_CODE_HOST_SESSION_ID || '';
+  return host ? `s-${host.replace(/^local[-_]/, '').slice(0, 6)}` : 'anon';
+}
+
+function touchWorker(s, name, patch = {}) {
+  ensureWork(s);
+  let w = s.workers[name];
+  if (!w) {
+    // A worker joining mid-build was not here for what already happened, so its
+    // event cursor starts at the end. Starting at 0 would replay the entire
+    // grill into an agent that only came to write one file.
+    const last = s.events.length ? s.events[s.events.length - 1].n : 0;
+    w = s.workers[name] = { firstSeen: new Date().toISOString(), note: '' };
+    if (s.cursors[name] === undefined) s.cursors[name] = last;
+  }
+  w.lastSeen = new Date().toISOString();
+  Object.assign(w, patch);
+  return w;
+}
+
+const minutesSince = (iso) => (iso ? Math.round((Date.now() - Date.parse(iso)) / 60000) : null);
+
+// A step is takeable when nothing it depends on is outstanding and no one else
+// is holding it. `needs` is what makes the fan-out correct rather than merely
+// concurrent: without it an agent cheerfully claims "write the regression test"
+// while the fix it tests is still being written.
+function blockersFor(steps, st) {
+  return (st.needs || []).filter((id) => {
+    const dep = steps.find((x) => x.id === id);
+    return !dep || dep.status !== 'done';
+  });
+}
+
+function takeable(steps, st) {
+  return st.status === 'pending' && !st.owner && blockersFor(steps, st).length === 0;
 }
 
 // What the user actually settled, rendered for the top of a review card. This
@@ -396,8 +447,9 @@ function verdictOf(s, c) {
   return { key, label: VERDICTS[key] || (key ? key : 'in their own words'), text: q.answer.text || '' };
 }
 
-function logChanges(s, list) {
+function logChanges(s, list, author) {
   ensureWork(s);
+  if (author) touchWorker(s, author);
   const added = [], updated = [], unlinked = [];
   for (const raw of list) {
     const title = String(raw.title || '').trim();
@@ -411,6 +463,9 @@ function logChanges(s, list) {
       risk: raw.risk || '',
       spoken: String(raw.spoken || '').trim(),
       step: raw.step || null,
+      // Who wrote it. A rewrite can land with a different author than the
+      // original — that is fine and worth seeing, so it is not pinned.
+      author: author || raw.author || null,
     };
     if (!fields.because.length) unlinked.push(title);
     // Re-logging under the same id is the revise loop: the change is rewritten
@@ -491,7 +546,10 @@ function recordAsk(p, body) {
     const q = cur.questions.find((x) => x.id === body.id);
     if (!q) return { ok: false, error: 'unknown question' };
     q.ask = { kind, at: new Date().toISOString() };
-    pushEvent(cur, { type: 'ask', kind, id: q.id, thread: q.thread, title: q.title });
+    // `changeId` is what routes this to the agent who wrote the change when a
+    // build is shared. Asking a review card to be re-said is a job for whoever
+    // knows the code, not for whoever happens to be leading.
+    pushEvent(cur, { type: 'ask', kind, id: q.id, thread: q.thread, title: q.title, changeId: q.changeId || null });
     return { ok: true, id: q.id };
   });
 }
@@ -870,8 +928,9 @@ function makeHandler(boardPath) {
           // page uses to hang "→ built c3" off the decision that caused it.
           changes: (cur.changes || []).map((c) => ({
             id: c.id, title: c.title, because: c.because || [], files: c.files || [],
-            reviewId: c.reviewId, rev: c.rev || 1, step: c.step || null,
+            reviewId: c.reviewId, rev: c.rev || 1, step: c.step || null, author: c.author || null,
           })),
+          workers: cur.workers || {},
           rev: cur.rev || cur.nextId * 1e6 + cur.nextEvent,
           questions: cur.questions,
         });
@@ -931,6 +990,22 @@ function makeHandler(boardPath) {
 
 async function serve() {
   const p = statePath();
+  // Two grills on the same subject the same day derive the same state path, and
+  // the result used to be silent: both bound a port, both served ONE file, the
+  // later title won and each URL showed the other's questions merged in. Several
+  // agents sharing a board on purpose is the whole point of `--as`; two
+  // unrelated grills colliding by accident is not, and it has to be loud.
+  if (!args.adopt && existsSync(p)) {
+    const prior = peek(p);
+    const live = readRegistry()[p];
+    let alive = false;
+    try { alive = !!(live && live.pid) && (process.kill(live.pid, 0), true); } catch { alive = false; }
+    if (alive && prior && args.title && String(args.title) !== prior.title) {
+      die(`"${prior.title}" is already running on this exact state path (pid ${live.pid}, port ${live.port}).\n` +
+          `  Two different grills would merge into one board.\n` +
+          `  Use a different --state path, or --adopt to join that board on purpose.`);
+    }
+  }
   // mutate creates the board if it isn't there, under the lock — so a concurrent
   // `add` can win the race to create it without either of them losing anything.
   mutate(p, (cur) => {
@@ -987,12 +1062,38 @@ function cmdAdd() {
 
 function cmdNew() {
   const p = statePath();
+  // The cursor is per agent. One shared cursor was fine while one agent drained
+  // the board; with several it is a race where whoever calls `new` first
+  // swallows everyone else's wake and the others are told nothing happened.
+  const me = args.as ? whoami() : null;
   const out = mutate(p, (s) => {
-    const fresh = s.events.filter((e) => e.n > (s.cursor || 0));
-    s.cursor = s.events.length ? s.events[s.events.length - 1].n : 0;
+    const last = s.events.length ? s.events[s.events.length - 1].n : 0;
+    if (!me) {
+      const fresh = s.events.filter((e) => e.n > (s.cursor || 0));
+      s.cursor = last;
+      return fresh;
+    }
+    ensureWork(s);
+    touchWorker(s, me); // seeds this worker's cursor at `last` if it is new here
+    const from = s.cursors[me] ?? 0;
+    const fresh = s.events.filter((e) => e.n > from).filter((e) => (args.mine ? forWorker(s, e, me) : true));
+    s.cursors[me] = last;
     return fresh;
   });
   process.stdout.write(JSON.stringify(out, null, 2) + '\n');
+}
+
+// Is this event this worker's business? Anything about a change — a verdict on
+// it, or a request to re-say its review card — belongs to whoever wrote it.
+// Messages are addressed to everyone. Everything else is the lead's: a worker
+// woken by an answer to q7 has no idea what to do with it.
+function forWorker(s, ev, me) {
+  if (ev.type === 'message') return true;
+  if (ev.changeId) {
+    const c = (s.changes || []).find((x) => x.id === ev.changeId);
+    return !c || !c.author || c.author === me;
+  }
+  return false;
 }
 
 function describe(ev) {
@@ -1036,6 +1137,10 @@ function peek(p) {
 
 async function cmdWatch() {
   const p = statePath();
+  // `--mine` is what stops N agents all waking on one verdict meant for one of
+  // them. Without it every worker's Monitor fires on every event on the board.
+  const me = args.as ? whoami() : null;
+  const only = me && args.mine;
   let seen = 0;
   let announcedDrain = false;
   while (!existsSync(p)) await sleep(200); // wait for serve/add to create it
@@ -1050,11 +1155,17 @@ async function cmdWatch() {
     for (const ev of s.events) {
       if (ev.n <= seen) continue;
       seen = ev.n;
-      process.stdout.write(describe(ev) + '\n');
+      // Still resets the drain latch even when filtered out — the board did move,
+      // and a later `[drained]` has to be allowed to fire again.
       announcedDrain = false;
+      if (only && !forWorker(s, ev, me)) continue;
+      process.stdout.write(describe(ev) + '\n');
     }
     const c = counts(s);
-    if (c.open === 0 && c.queued === 0 && s.questions.length && !announcedDrain) {
+    // "The board is empty" is a signal for whoever runs the board, not for the
+    // five workers on it — each of which would otherwise wake to be told about
+    // work that is not theirs. A worker wakes for verdicts on what it wrote.
+    if (!only && c.open === 0 && c.queued === 0 && s.questions.length && !announcedDrain) {
       // The board drains twice — once when the questions run out and the build
       // should start, once when every change has a verdict. They call for
       // opposite work, so they are not the same line.
@@ -1089,16 +1200,28 @@ function cmdBuild() {
   if (args.step) {
     const status = String(args.status || 'done');
     if (!STEP_STATUS.includes(status)) die(`--status must be one of ${STEP_STATUS.join(', ')}`);
+    const me = whoami();
     const out = mutate(p, (s) => {
       ensureWork(s);
       const st = s.build.steps.find((x) => x.id === args.step);
       if (!st) return null;
+      // Only the holder moves a claimed step. A single-agent build claims
+      // nothing and owns nothing, so it passes straight through — the check
+      // only bites once someone has actually taken the work.
+      if (st.owner && st.owner !== me && !args.force) {
+        return { denied: `${st.id} is held by ${st.owner} — claim it, or pass --force` };
+      }
+      touchWorker(s, me);
       st.status = status;
       if (args.note !== undefined) st.note = String(args.note);
       st.at = new Date().toISOString();
+      // Finishing or failing hands the step back; the holder is kept for the
+      // record, but `owner` is what "someone is on this right now" means.
+      if (status === 'done' || status === 'failed') { st.doneBy = st.owner || me; st.owner = null; }
       return st;
     });
     if (!out) die(`no build step ${args.step}`);
+    if (out.denied) die(out.denied);
     process.stdout.write(`${out.id} ${out.status}\n`);
     return;
   }
@@ -1119,7 +1242,13 @@ function cmdBuild() {
       s.build.steps.push({
         id, title,
         because: (raw.because || []).map(String),
+        // What must be done first, and what this step expects to touch. Both are
+        // read by `claim`: the first to decide whether the step is takeable at
+        // all, the second to warn when two agents are heading for one file.
+        needs: (raw.needs || []).map(String),
+        files: (raw.files || []).map(String),
         status: 'pending', note: raw.note || '', at: null,
+        owner: null, claimedAt: null,
       });
       added.push(id);
     }
@@ -1128,15 +1257,106 @@ function cmdBuild() {
   process.stdout.write(`building — ${ids.length} step${ids.length === 1 ? '' : 's'}: ${ids.join(' ')}\n`);
 }
 
+// Take one step, exclusively. This is the whole concurrency story: the pick and
+// the mark happen inside the same lock as every other write, so two agents
+// racing for the last step cannot both win it.
+function cmdClaim() {
+  const p = statePath();
+  const me = whoami({ required: true });
+  const out = mutate(p, (s) => {
+    ensureWork(s);
+    touchWorker(s, me, args.note !== undefined ? { note: String(args.note) } : {});
+    const steps = s.build.steps;
+    if (!steps.length) return { ok: false, why: 'no build plan yet' };
+
+    const target = args.steal && args.steal !== true ? String(args.steal) : args.step && args.step !== true ? String(args.step) : null;
+    let st;
+    if (target) {
+      st = steps.find((x) => x.id === target);
+      if (!st) return { ok: false, why: `no step ${target}` };
+      if (st.status === 'done') return { ok: false, why: `${target} is already done` };
+      if (st.owner && st.owner !== me && !args.steal) {
+        return { ok: false, why: `${target} is held by ${st.owner} (${minutesSince(st.claimedAt)}m) — pass --steal ${target} to take it anyway`, held: true };
+      }
+      const blocked = blockersFor(steps, st);
+      if (blocked.length && !args.steal) return { ok: false, why: `${target} waits on ${blocked.join(', ')}` };
+    } else {
+      st = steps.find((x) => takeable(steps, x));
+      if (!st) {
+        const left = steps.filter((x) => x.status !== 'done');
+        if (!left.length) return { ok: false, why: 'every step is done', drained: true };
+        const held = left.filter((x) => x.owner).map((x) => `${x.id}→${x.owner}`);
+        const waiting = left.filter((x) => !x.owner).map((x) => `${x.id} waits on ${blockersFor(steps, x).join(',')}`);
+        return { ok: false, why: `nothing takeable right now. ${[...held, ...waiting].join('; ')}` };
+      }
+    }
+
+    const stolenFrom = st.owner && st.owner !== me ? st.owner : null;
+    // A file two live steps both expect to touch is the one thing this queue
+    // cannot make safe, so it says so rather than pretending. Plans guess at
+    // their file lists, which is why this warns instead of refusing.
+    const mine = new Set(st.files || []);
+    const overlap = steps
+      .filter((x) => x.id !== st.id && x.status === 'running' && x.owner)
+      .flatMap((x) => (x.files || []).filter((f) => mine.has(f)).map((f) => `${f} (also ${x.id}, ${x.owner})`));
+
+    st.owner = me;
+    st.status = 'running';
+    st.claimedAt = new Date().toISOString();
+    st.at = st.claimedAt;
+    if (stolenFrom) st.stolenFrom = stolenFrom;
+    return { ok: true, step: st, stolenFrom, overlap };
+  });
+
+  if (!out.ok) {
+    process.stdout.write(`${out.why}\n`);
+    // Nothing left is a normal end to a worker loop, not a failure. Everything
+    // else is: exiting 0 on "someone else holds it" makes a loop spin forever.
+    process.exit(out.drained ? 0 : 3);
+  }
+  process.stdout.write(`${out.step.id} ${out.step.title}\n`);
+  if ((out.step.because || []).length) process.stdout.write(`  because ${out.step.because.join(' ')}\n`);
+  if ((out.step.files || []).length) process.stdout.write(`  files   ${out.step.files.join(' ')}\n`);
+  if (out.stolenFrom) process.stderr.write(`  TAKEN FROM ${out.stolenFrom} — make sure they really stopped\n`);
+  for (const o of out.overlap) process.stderr.write(`  OVERLAP ${o}\n`);
+}
+
+function cmdRelease() {
+  const p = statePath();
+  const me = whoami({ required: true });
+  const id = args.step && args.step !== true ? String(args.step) : null;
+  const out = mutate(p, (s) => {
+    ensureWork(s);
+    touchWorker(s, me);
+    const held = s.build.steps.filter((x) => x.owner === me && (!id || x.id === id));
+    if (!held.length) return { ok: false, why: id ? `you do not hold ${id}` : 'you hold nothing' };
+    for (const st of held) {
+      st.owner = null;
+      st.claimedAt = null;
+      st.status = args.failed ? 'failed' : 'pending';
+      // Giving a step back leaves no trace on purpose — the next agent to take
+      // it is the one who did it. Failing it is a fact about a person's
+      // attempt, so that one is signed.
+      if (args.failed) st.doneBy = me;
+      if (args.reason) st.note = String(args.reason);
+      st.at = new Date().toISOString();
+    }
+    return { ok: true, ids: held.map((x) => x.id) };
+  });
+  if (!out.ok) die(out.why);
+  process.stdout.write(`released ${out.ids.join(' ')}${args.failed ? ' (failed)' : ''}\n`);
+}
+
 function cmdChange() {
   const p = statePath();
   const src = args.file === '-' || !args.file ? readFileSync(0, 'utf8') : readFileSync(resolve(args.file), 'utf8');
   let list;
   try { list = JSON.parse(src); } catch (e) { die(`changes JSON is invalid: ${e.message}`); }
   if (!Array.isArray(list)) list = [list];
-  const out = mutate(p, (s) => logChanges(s, list));
+  const me = whoami();
+  const out = mutate(p, (s) => logChanges(s, list, me));
   const bits = [];
-  if (out.added.length) bits.push(`logged ${out.added.join(' ')}`);
+  if (out.added.length) bits.push(`logged ${out.added.join(' ')} as ${me}`);
   if (out.updated.length) bits.push(`rewrote ${out.updated.join(' ')} — their reviews reopened`);
   process.stdout.write(`${bits.join('; ') || 'nothing to log'}\n`);
   // A change with no `because` is one nobody asked for. That is allowed —
@@ -1188,16 +1408,29 @@ function cmdStatus() {
     `  open ${c.open} · queued ${c.queued} · answered ${c.answered} · retired ${c.retired}\n` +
     `  threads: ${threads.join(', ')}\n` +
     `  unread events: ${s.events.filter((e) => e.n > (s.cursor || 0)).length}\n`;
+  const workers = Object.entries(s.workers || {});
+  if (workers.length) {
+    out += `  agents: ${workers.length}\n`;
+    for (const [name, w] of workers) {
+      const holding = (s.build ? s.build.steps : []).filter((x) => x.owner === name).map((x) => x.id);
+      out += `    ${name} — ${holding.length ? `on ${holding.join(',')}` : 'idle'}, last seen ${minutesSince(w.lastSeen)}m ago${w.note ? ` · ${w.note}` : ''}\n`;
+    }
+  }
   if (s.build && s.build.steps.length) {
     const done = s.build.steps.filter((x) => x.status === 'done').length;
     out += `  build: ${done}/${s.build.steps.length} steps\n`;
-    for (const st of s.build.steps) out += `    ${st.status === 'done' ? '✓' : st.status === 'running' ? '◐' : st.status === 'failed' ? '✕' : '·'} ${st.id} ${st.title}\n`;
+    for (const st of s.build.steps) {
+      const mark = st.status === 'done' ? '✓' : st.status === 'running' ? '◐' : st.status === 'failed' ? '✕' : '·';
+      const who = st.owner ? `  ← ${st.owner} (${minutesSince(st.claimedAt)}m)` : st.doneBy ? `  ${st.doneBy}` : '';
+      const waits = blockersFor(s.build.steps, st);
+      out += `    ${mark} ${st.id} ${st.title}${who}${waits.length && st.status === 'pending' ? `  waits on ${waits.join(',')}` : ''}\n`;
+    }
   }
   if ((s.changes || []).length) {
     out += `  changes: ${s.changes.length}\n`;
     for (const ch of s.changes) {
       const v = verdictOf(s, ch);
-      out += `    ${ch.id} ${ch.title}  (${(ch.because || []).join(',') || 'unlinked'}) — ${v ? v.label : ch.reviewId ? 'awaiting review' : 'not sent for review'}\n`;
+      out += `    ${ch.id} ${ch.title}  (${(ch.because || []).join(',') || 'unlinked'})${ch.author ? ` by ${ch.author}` : ''} — ${v ? v.label : ch.reviewId ? 'awaiting review' : 'not sent for review'}\n`;
     }
   }
   process.stdout.write(out);
@@ -1249,9 +1482,10 @@ function cmdExport() {
     lines.push('## The build', '');
     for (const st of s.build.steps) {
       const mark = { done: 'x', running: '~', failed: '!', pending: ' ' }[st.status] || ' ';
+      const who = st.doneBy || st.owner;
       lines.push(`- [${mark}] **${st.id}** ${st.title}` +
         `${(st.because || []).length ? ` *(${st.because.join(', ')})*` : ''}` +
-        `${st.note ? ` — ${st.note}` : ''}`);
+        `${who ? ` — ${who}` : ''}${st.note ? ` — ${st.note}` : ''}`);
     }
     lines.push('');
   }
@@ -1260,7 +1494,8 @@ function cmdExport() {
     lines.push('## What was built', '');
     for (const c of s.changes) {
       lines.push(`### ${c.id} — ${c.title}`, '');
-      if (c.rev > 1) lines.push(`*Revision ${c.rev}.*`, '');
+      if (c.author) lines.push(`*Written by ${c.author}.*${c.rev > 1 ? ` *Revision ${c.rev}.*` : ''}`, '');
+      else if (c.rev > 1) lines.push(`*Revision ${c.rev}.*`, '');
       if (c.summary) lines.push(c.summary, '');
       if ((c.files || []).length) lines.push(`**Files** — ${c.files.map((f) => `\`${f}\``).join(', ')}`, '');
       // The back link, and the reason this file is a record rather than a diff
@@ -1343,10 +1578,14 @@ const verbs = {
   serve, add: cmdAdd, new: cmdNew, watch: cmdWatch, retire: cmdRetire,
   note: cmdNote, status: cmdStatus, export: cmdExport, mcp: cmdMcp, gateway: cmdGateway,
   build: cmdBuild, change: cmdChange, review: cmdReview,
+  claim: cmdClaim, release: cmdRelease,
 };
 
 if (!cmd || !verbs[cmd]) {
-  process.stderr.write('usage: board.mjs <serve|add|new|watch|retire|note|status|export|mcp|gateway|build|change|review> --state <path>\n');
+  process.stderr.write(
+    'usage: board.mjs <serve|add|new|watch|retire|note|status|export|mcp|gateway|build|change|review|claim|release> --state <path>\n' +
+    '       agents sharing one board pass --as <name> to claim, log and drain independently\n'
+  );
   process.exit(1);
 }
 await verbs[cmd]();

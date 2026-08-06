@@ -131,6 +131,31 @@ the same board.
 `export` then writes the record — every decision, what it produced, every change
 with its diff and its verdict — which is the thing you actually keep.
 
+## Several agents on one build
+
+Past three or four independent steps, building them in a line is just slow. So
+the board doubles as the work queue: agents **claim** steps off it.
+
+```
+Building what you decided — 3 agents               1/4
+  ◐  Split retryable vs terminal in classifyError    outbox    q1 q3
+  ·  Backfill the 41 stuck rows        waits on s1                q2
+  ◐  Regression test for a 401 in the outbox         tests        q1
+
+     outbox s1    tests s3    docs idle
+```
+
+A claim is exclusive — the pick and the mark happen inside the same lock as
+every other write, so two agents racing for the last step cannot both win it. A
+step declares what must finish before it (`needs`) and what it expects to touch
+(`files`); the first gates the claim, the second warns when two live steps are
+heading for the same file. Nothing is taken from a slow agent silently: you're
+told who holds it and for how long, and `--steal` says so on the board.
+
+Every change is signed, so *"why is it done that way"* has someone to ask. And
+each agent keeps its own event cursor — so a **change the code** verdict wakes
+exactly the agent that wrote that change, which is the one that still knows why.
+
 ## Answering out loud
 
 The board is also an MCP server, so another session — one with a voice mode, on
@@ -181,13 +206,14 @@ and keyboard mid-board without telling either one.
 
 ## How it works
 
-A ~600-line zero-dependency Node server and a single HTML page.
+A zero-dependency Node server and a single HTML page.
 
 ```
-board.mjs    server + CLI (serve, add, new, watch, retire, note, status, export,
-                           build, change, review, mcp, gateway)
-board.html   the page
-SKILL.md     the instructions Claude follows
+board.mjs      server + CLI (serve, add, new, watch, retire, note, status, export,
+                             build, change, review, claim, release, mcp, gateway)
+board.html     the page
+SKILL.md       the instructions Claude follows
+test-claim.sh  the claim protocol, raced for real
 ```
 
 State is one JSON file per board. The CLI writes questions into it, the page
