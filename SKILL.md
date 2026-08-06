@@ -1,6 +1,6 @@
 ---
 name: grill-board
-description: Reach agreement on a plan, design, spec — or on how a change is actually going to be written — through a live web board instead of one blocking question at a time. Posts roomy, self-contained questions answered in any order; each answer wakes the session to branch follow-ups while the rest stay answerable. For a bug or a change it diagnoses first and then grills on the implementation forks, so the user is in the code decision rather than describing the problem. Use when the user says "grill-board", "grill me in parallel", "batch grill me", or prefixes a task with it ("grill-board fix the retry loop"), or wants a plan stress-tested without being blocked one question at a time.
+description: Reach agreement on a plan, design, spec — or on how a change is actually going to be written — through a live web board instead of one blocking question at a time, then build what was agreed and hand every diff back for review against the answer that caused it. Posts roomy, self-contained questions answered in any order; each answer wakes the session to branch follow-ups while the rest stay answerable. For a bug or a change it diagnoses first and grills on the implementation forks, so the user is in the code decision rather than describing the problem; when the questions run out it shows the build happening on the same board and reviews each change against its decisions. Use when the user says "grill-board", "grill me in parallel", "batch grill me", or prefixes a task with it ("grill-board fix the retry loop"), or wants a plan stress-tested without being blocked one question at a time.
 ---
 
 # grill-board
@@ -22,6 +22,14 @@ because the synchronous version stalls:
 seed a batch ──► user answers any card ──► you wake ──► branch that thread
      ▲                    (never blocked)                      │
      └──────────────── new cards appear live ◄─────────────────┘
+                                │
+                          board drains
+                                ▼
+              build it, live on the same board
+                                │
+                                ▼
+     every change back as a card, next to the answer that caused it
+                       accept · change the code · reopen the decision
 ```
 
 You are woken by a `Monitor` event per answer. **Between wakes you end your
@@ -116,19 +124,118 @@ node ~/.claude/skills/grill-board/board.mjs add --state "$S" --file next.json
 node ~/.claude/skills/grill-board/board.mjs retire --state "$S" --id q7,q9 --reason "settled by q4"
 ```
 
-**6. Finish** when `[drained]` arrives and no thread has anything left worth
-asking. Then produce the payoff — not a transcript dump:
+**6. When `[drained]` arrives** and no thread has anything left worth asking,
+the questions are over. What happens next depends on what the answers describe:
+
+- **Something you can write now** — a fix, a refactor, a feature whose shape is
+  now settled. **Build it.** Do not stop to ask permission: twenty answered
+  questions *were* the permission, and asking again is the blocking move this
+  skill exists to delete. Go to "Past the last question" below.
+- **Something you cannot** — a strategy, a spec, a roadmap, work that needs
+  people or time you do not have. Then the payoff is the document. Export,
+  write up the decisions reached (with who decided — them or you-by-default),
+  what is still genuinely open, and what you recommend. Offer to stop the server.
 
 ```bash
 node ~/.claude/skills/grill-board/board.mjs export --state "$S" --out decisions.md
 ```
 
-Write, in the conversation: the decisions reached (with who decided — them or
-you-by-default), the ones still genuinely open, and what you now recommend
-building. Offer to stop the server.
+## Past the last question: build, then review
 
-If the subject was a change rather than a plan, the payoff is the implementation
-itself — see below — and the offer is to write it, not to stop.
+A decision that never becomes code was a conversation, not an agreement. So the
+board keeps going: it shows the build happening, then hands every change back
+with the decisions that produced it attached.
+
+**1. Post the plan before you write a line of it.** This is the same rule as
+seeding cheap questions first — the board must never sit empty while you work.
+
+```bash
+node ~/.claude/skills/grill-board/board.mjs build --state "$S" --file - <<'JSON'
+[{ "title": "Split retryable vs terminal in classifyError", "because": ["q1","q3"] },
+ { "title": "Backfill the 41 stuck rows", "because": ["q2"] }]
+JSON
+```
+
+Every step names the questions that produced it. A step that traces back to no
+answer is a step nobody asked for — either it is groundwork (fine, say so) or
+you are building something they did not agree to.
+
+**2. Mark each step as you reach it**, never in a batch at the end. The panel is
+the only sign anything is happening.
+
+```bash
+node ~/.claude/skills/grill-board/board.mjs build --state "$S" --step s1 --status running
+node ~/.claude/skills/grill-board/board.mjs build --state "$S" --step s1 --status done --note "3 callers re-tested"
+```
+
+**3. Log each change the moment it lands.** Write the JSON with the `Write` tool
+rather than a heredoc — a diff is full of quotes, backslashes and newlines, and
+hand-escaping it into a shell string is a turn wasted every time.
+
+```bash
+node ~/.claude/skills/grill-board/board.mjs change --state "$S" --file /tmp/c1.json
+```
+
+**4. When the build is done, hand it back.**
+
+```bash
+node ~/.claude/skills/grill-board/board.mjs review --state "$S"
+```
+
+Every logged change becomes a card carrying its summary, its files, **the
+decisions that caused it with the answers they gave**, and the diff. The queue
+cap lifts for the batch: a review is finite and revealing it a few at a time
+leaves them unable to tell whether they have seen the one that matters.
+
+**5. On a review wake** the event says `[review] c3 from q1 — <verdict>`:
+
+| verdict | what you owe them |
+|---|---|
+| `looks right` | Nothing. Do not thank them, do not re-explain it. |
+| `change the code` | Rewrite it, then **re-log under the same `id`**. The card reopens at revision 2 with the new diff. Never open a second change for a rewrite of the first. |
+| `reopen the decision` | The code was faithful; the decision was wrong. `add` that question again as a fresh card — sharper for what building it taught you — and rebuild when it is answered. |
+
+A verdict with free text is the normal case, and the text outranks the button.
+"Looks right, but rename that flag" is a rewrite, not an acceptance.
+
+**6. `[reviewed]` means every change has a verdict.** Export the record and say
+what stands. Offer to commit; do not commit unasked.
+
+### Writing a change entry
+
+```json
+{
+  "title": "classifyError now splits retryable from terminal",
+  "because": ["q1", "q3"],
+  "files": ["backend/src/sync/classify.ts:40-72", "backend/src/sync/outbox.ts:112"],
+  "summary": "A 4xx and a CHECK violation are now **terminal**: the outbox moves them to dead-letter instead of sleeping and retrying forever. The other two `classifyError` callers pick this up for free, which is what you asked for in q3.",
+  "risk": "I kept your max-attempts cap as a backstop at **5**. That number is a guess — everything else follows from your answer.",
+  "spoken": "The error classifier now tells a temporary failure from a permanent one, so a 401 stops instead of retrying for ever.",
+  "diff": "--- a/backend/src/sync/classify.ts\n+++ b/backend/src/sync/classify.ts\n@@ -40,9 +40,15 @@\n-  return { kind: 'error' as const };\n+  const status = statusOf(e);\n+  if (status && status >= 400 && status < 500) return { kind: 'terminal' as const, status };\n+  return { kind: 'retryable' as const, status };"
+}
+```
+
+- **`because` is the point of the whole thing.** Without it you are asking
+  someone to approve a diff and remember unaided what they asked for. It is a
+  list because one change often settles two answers; the same question showing
+  up under three changes is normal and correct.
+- **One change per thing they could sensibly say no to.** Not one per file, not
+  one per commit. If half of it could be accepted and half rejected, it is two.
+- **`title` says what changed, not what you did.** "classifyError now splits
+  retryable from terminal", never "Updated classifyError".
+- **`summary` is prose, and it is what a voice client reads out** in place of
+  the diff. Say what is now true, not what you edited.
+- **`risk` is the guess you made**, and it becomes the card's "What I'm least
+  sure about". Not "I think this is right" — name the number you invented, the
+  case you did not handle, the test you did not write. If there is genuinely
+  nothing, leave it out rather than padding it.
+- **`diff` is the real diff.** `git diff -- <file>` output, not a paraphrase and
+  not the whole file. Trim it to the hunks that matter; a 400-line diff in a
+  card is not a review, it is a dare.
+- Changes that fell out of the work and answer no question — a lockfile, a
+  formatting pass — still get logged, with no `because`. They are listed as
+  groundwork. The CLI warns about them on stderr; that warning is for you, not
+  a failure.
 
 ## When the subject is a change, not a plan
 
@@ -158,9 +265,10 @@ Cards that need no reading, so the board is useful in seconds: how much this is
 worth spending (a patch today or the right fix), whether they already suspect a
 cause, and whether changing the current behaviour is even allowed.
 
-Finish differently too. For a change the payoff is **the implementation you are
-about to write** — the files, the seam, the order, the test — then offer to
-write it.
+Finish differently too. A change is by definition buildable, so when the board
+drains you go straight into "Past the last question" — plan on the board, build
+it, hand every diff back for review against the answer that caused it. You do
+not stop to offer.
 
 A fix-shaped card looks like this. Note that it arrives already knowing the
 cause, and that the choices are three implementations, not three theories:
@@ -241,6 +349,10 @@ thread ends when the next question would not change what gets built.
 - Keep the `note` current on every wake — it drives the liveness dot in the
   header and is that dot's tooltip. **A few words, not a sentence**; the board
   deliberately gives it no room on screen. It greys out after two minutes.
+- **The building phase is the one place you hold the turn for a long time**, and
+  it is the one place they cannot see what you are doing. The step marks are the
+  whole signal. Move one before you start it and again when it lands — a panel
+  frozen on step 1 for ten minutes is indistinguishable from a dead session.
 - The server binds `0.0.0.0` so a phone on the LAN can answer. Pass
   `--host 127.0.0.1` to keep it on the machine.
 - Ports auto-select from 7800 upward, so concurrent sessions do not collide.
@@ -257,5 +369,9 @@ thread ends when the next question would not change what gets built.
 | `watch --state P` | one stdout line per event — for `Monitor` |
 | `retire --state P --id q3,q4 --reason R` | kill cards a later answer made moot |
 | `note --state P --text T` | set the liveness line shown in the header |
-| `status --state P` | counts and unread total |
-| `export --state P [--out F]` | markdown transcript |
+| `status --state P` | counts, phase, build progress, every change and its verdict |
+| `export --state P [--out F]` | the record: decisions, what each one produced, the build, every change with its diff and verdict |
+| `build --state P --file F` | declare the build; the board flips to `building` and shows the steps |
+| `build --state P --step s2 --status running\|done\|failed [--note N]` | move one step |
+| `change --state P --file F` | log built changes (JSON array). Re-logging with an existing `id` rewrites it and reopens its review |
+| `review --state P` | turn every unreviewed change into a card, with its decisions attached |

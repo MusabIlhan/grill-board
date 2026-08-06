@@ -419,6 +419,55 @@
     border-radius: 9px; padding: 8px 12px;
   }
 
+  /* ------------------------------------------------------------ build */
+  /* What the board becomes once the questions run out: the work happening,
+     then the finished changes handed back with the decisions that caused them. */
+  .phase {
+    font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    padding: 2px 8px; border-radius: 99px; flex: none;
+    color: var(--ink-3); background: var(--panel-2); border: 1px solid var(--line);
+  }
+  .phase[hidden] { display: none; }
+  .phase.building { color: var(--warn); background: color-mix(in srgb, var(--warn) 13%, transparent); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+  .phase.review { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+
+  details.build {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow); margin: 0 0 16px; overflow: hidden;
+  }
+  details.build > summary {
+    cursor: pointer; list-style: none; user-select: none;
+    display: flex; align-items: center; gap: 10px; padding: 13px 18px;
+    font-size: 13.5px; font-weight: 600;
+  }
+  details.build > summary::-webkit-details-marker { display: none; }
+  details.build > summary::after { content: "▾"; font-size: 10px; color: var(--ink-3); }
+  details.build[open] > summary::after { content: "▴"; }
+  details.build .tally { margin-left: auto; font-size: 12.5px; font-weight: 500; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .steps { padding: 0 18px 14px; }
+  .step { display: flex; gap: 10px; align-items: baseline; padding: 4px 0; font-size: 13.5px; line-height: 1.5; }
+  .step .mark { flex: none; width: 13px; text-align: center; color: var(--ink-3); font-size: 12px; }
+  .step.done { color: var(--ink-3); }
+  .step.done .mark { color: var(--good); }
+  .step.running { color: var(--ink); font-weight: 550; }
+  .step.running .mark { color: var(--warn); animation: pulse 1.6s ease-in-out infinite; }
+  .step.failed .mark { color: var(--danger); }
+  .step .from { margin-left: auto; padding-left: 12px; flex: none; font-size: 11px; color: var(--ink-3); }
+  .step .note { color: var(--ink-3); font-size: 12.5px; }
+
+  /* A review card is not a question — it is code that already exists. The rail
+     says so at a glance, so a diff is never mistaken for a proposal. */
+  .card.review { border-left: 3px solid var(--accent); }
+  .card.review.child { margin-left: 22px; }
+  .chip.built { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+  .prose pre.diff { line-height: 1.5; }
+  .prose pre.diff .add { color: var(--good); }
+  .prose pre.diff .del { color: var(--danger); }
+  .prose pre.diff .at { color: var(--ink-3); }
+  /* On an answered card, what that answer turned into. The loop closed. */
+  .built-from { margin-top: 3px; font-size: 12px; color: var(--ink-3); }
+  .built-from b { font-weight: 600; color: var(--accent); cursor: pointer; }
+
   /* --------------------------------------------------------- float bar */
   /* Fixed, but constrained to the card column's width so the buttons sit over
      the cards rather than off in the empty margin of a wide window. */
@@ -493,6 +542,7 @@
 <header>
   <div class="head-inner">
     <h1 id="title">Grill board</h1>
+    <span class="phase" id="phase" hidden></span>
     <span class="live" id="live" hidden></span>
     <div class="spacer"></div>
     <div class="meter" title="answered"><i id="bar"></i></div>
@@ -597,13 +647,26 @@
     while (i < lines.length) {
       const line = lines[i];
 
-      if (/^```/.test(line)) {
+      const open = line.match(/^(`{3,})(\w*)/);
+      if (open) {
         flushPara(); flushList();
         const buf = [];
         i++;
-        while (i < lines.length && !/^```/.test(lines[i])) buf.push(lines[i++]);
+        // Close only on a fence at least as long as the opening one. A diff of a
+        // markdown file contains ``` lines, and closing on the first of those
+        // spills the rest of the diff into the page as prose.
+        const close = new RegExp(`^\`{${open[1].length},}\\s*$`);
+        while (i < lines.length && !close.test(lines[i])) buf.push(lines[i++]);
         i++;
-        out.push(`<pre><code>${esc(buf.join('\n'))}</code></pre>`);
+        const body = buf.join('\n');
+        if (open[2] === 'diff') {
+          // Tint by line, so a long diff can be skimmed for what moved.
+          const rows = body.split('\n').map((l) => {
+            const k = l.startsWith('+') ? 'add' : l.startsWith('-') ? 'del' : /^@@|^diff |^index |^---|^\+\+\+/.test(l) ? 'at' : '';
+            return k ? `<span class="${k}">${esc(l)}</span>` : esc(l);
+          });
+          out.push(`<pre class="diff"><code>${rows.join('\n')}</code></pre>`);
+        } else out.push(`<pre><code>${esc(body)}</code></pre>`);
         continue;
       }
 
@@ -649,6 +712,15 @@
         i++; continue;
       }
 
+      // An indented line under a bullet belongs to that bullet. Without this it
+      // closed the list and became a paragraph — which is how a review card came
+      // to show the question it was built from, then the decision made on it
+      // detached below the list, reading as unrelated prose.
+      if (list && /^\s+\S/.test(line) && out.length && out[out.length - 1].endsWith('</li>')) {
+        out[out.length - 1] = out[out.length - 1].replace(/<\/li>$/, `<br>${inline(line.trim())}</li>`);
+        i++; continue;
+      }
+
       flushList();
       para.push(line.trim());
       i++;
@@ -660,6 +732,12 @@
   // ------------------------------------------------------------ state
   const feed = document.getElementById('feed');
   let questions = [];
+  // Set once the questions run out: what is being built, and then each finished
+  // change with the question ids that decided it. Old boards send neither.
+  let phase = 'grilling';
+  let build = null;
+  let changes = [];
+  let buildOpen = null;        // null = follow the phase; true/false once toggled
   let lastRev = null;
   let seenIds = new Set();
   let firstLoad = true;
@@ -765,8 +843,57 @@
       live.classList.toggle('stale', age > 120000);
     } else live.hidden = true;
 
+    phase = s.phase || 'grilling';
+    build = s.build || null;
+    changes = s.changes || [];
+    const pill = document.getElementById('phase');
+    pill.hidden = phase === 'grilling';
+    pill.className = `phase ${phase}`;
+    pill.textContent = phase === 'building' ? 'building' : phase === 'review' ? 'review' : phase;
+
     questions = s.questions || [];
     render();
+  }
+
+  // Every change a given answer produced — the forward half of the link the
+  // review depends on. The backward half is printed inside the review card.
+  function builtFrom(qid) {
+    return changes.filter((c) => (c.because || []).includes(qid));
+  }
+
+  const MARK = { done: '✓', running: '◐', failed: '✕', pending: '·' };
+
+  function buildPanel() {
+    if (!build || !build.steps.length) return '';
+    const steps = build.steps;
+    const done = steps.filter((x) => x.status === 'done').length;
+    const failed = steps.filter((x) => x.status === 'failed').length;
+    // Open while it is happening; folded once it is history and the review
+    // cards below are the thing to look at.
+    const open = buildOpen === null ? phase !== 'review' : buildOpen;
+    const head = phase === 'review'
+      ? `Built — ${steps.length} step${steps.length === 1 ? '' : 's'}, ${changes.length} change${changes.length === 1 ? '' : 's'}`
+      : 'Building what you decided';
+    return `<details class="build" id="buildPanel" ${open ? 'open' : ''}>
+      <summary>${esc(head)}<span class="tally">${done}/${steps.length}${failed ? ` · ${failed} failed` : ''}</span></summary>
+      <div class="steps">${steps.map((st) => `
+        <div class="step ${esc(st.status)}">
+          <span class="mark">${MARK[st.status] || '·'}</span>
+          <span>${esc(st.title)}${st.note ? ` <span class="note">— ${esc(st.note)}</span>` : ''}</span>
+          ${(st.because || []).length ? `<span class="from">${esc(st.because.join(' '))}</span>` : ''}
+        </div>`).join('')}</div>
+    </details>`;
+  }
+
+  function emptyState() {
+    if (phase === 'building') {
+      return '<div class="empty"><div class="big">Questions done — Claude is building.</div>' +
+        'Every change comes back here to review when it lands.</div>';
+    }
+    if (phase === 'review') {
+      return '<div class="empty"><div class="big">Everything reviewed.</div>Nothing left waiting on you.</div>';
+    }
+    return '<div class="empty"><div class="big">No questions yet.</div>Claude is still reading. They will appear here.</div>';
   }
 
   // Depth-first by parent, so a follow-up sits directly under the answer that
@@ -989,17 +1116,13 @@
       `${answered}/${countable.length} answered` + (queued ? ` · ${queued} queued` : '') + (open ? ` · ${open} open` : '');
     document.getElementById('jump').hidden = !open;
 
-    if (!live.length) {
-      feed.innerHTML = '<div class="empty"><div class="big">No questions yet.</div>Claude is still reading. They will appear here.</div>';
-      return;
-    }
-
     // Keep threads in the order their first question was asked; inside a thread
     // keep ask order, so a follow-up sits directly under the answer that caused it.
     const threads = [];
     for (const q of live) if (!threads.includes(q.thread)) threads.push(q.thread);
 
-    const html = [];
+    const html = [buildPanel()];
+    if (!live.length) html.push(emptyState());
     for (const t of threads) {
       const inThread = orderThread(live.filter((q) => q.thread === t));
       const openCount = inThread.filter((q) => q.status === 'open').length;
@@ -1034,8 +1157,11 @@
       if (ta) { ta.focus(); if (caret) ta.setSelectionRange(caret[0], caret[1]); }
     }
 
-    // The seed batch is not "new" — you arrived to read it.
-    if (firstLoad) {
+    // The seed batch is not "new" — you arrived to read it. Only once there is
+    // something to arrive AT: the page is normally open before the first card
+    // exists, and spending the first load on an empty board would flag that
+    // whole seed batch as new the moment it landed.
+    if (firstLoad && live.length) {
       for (const q of live) seenIds.add(q.id);
       firstLoad = false;
       saveSeen();
@@ -1057,11 +1183,20 @@
       const picked = (q.answer?.keys || []).map((k) => esc(optLabel(q, k))).join(' + ');
       const txt = q.answer?.text ? `<em>${picked ? ' — ' : ''}“${esc(q.answer.text)}”</em>` : '';
       const ans = (picked || '') + txt || '<em>answered</em>';
+      // What this answer turned into, once it has. Clicking jumps to the review
+      // card, so a decision and its code are one hop apart in both directions.
+      const made = builtFrom(q.id);
+      const built = made.length
+        ? `<div class="built-from">Built: ${made.map((c) =>
+            `<b data-goto="${c.reviewId || ''}" title="${esc(c.title)}">${c.id}</b>`).join(' · ')}</div>`
+        : '';
       return `<div class="card done ${isChild ? 'child' : ''}" data-open="${q.id}" data-qid="${q.id}">
         <div class="done-row"><span class="tick">✓</span><div>
-          <div class="q">${esc(q.title)}</div><div class="a">${ans}</div>
+          <div class="q">${esc(q.title)}</div><div class="a">${ans}</div>${built}
         </div></div></div>`;
     }
+
+    if (q.kind === 'review') cls.push('review');
 
     const isNew = !seenIds.has(q.id) && !firstLoad;
     if (isNew) cls.push('is-new');
@@ -1081,16 +1216,17 @@
     return `<div class="${cls.join(' ')}" id="card-${q.id}" data-qid="${q.id}"><div class="card-body">
       <div class="card-meta">
         ${isNew ? '<span class="chip new">new</span>' : ''}
+        ${q.kind === 'review' ? `<span class="chip built">written · ${esc(q.changeId || '')}</span>` : ''}
         <span class="chip">${esc(q.thread)}</span>
         <span class="qid">${q.id}${q.multi ? ' · pick any' : ''}</span>
       </div>
       <h3 class="q-title">${esc(q.title)}</h3>
       ${q.context ? `<div class="prose">${md(q.context)}</div>` : ''}
       ${q.ask && ASKS[q.ask.kind] ? `<div class="ask-note">${esc(ASKS[q.ask.kind].said)} — Claude is rewriting it.</div>` : ''}
-      ${q.recommendation ? `<details class="take" data-take="${q.id}"><summary>Claude's take</summary><div class="prose">${md(q.recommendation)}</div></details>` : ''}
+      ${q.recommendation ? `<details class="take" data-take="${q.id}"><summary>${q.kind === 'review' ? 'What I\'m least sure about' : 'Claude\'s take'}</summary><div class="prose">${md(q.recommendation)}</div></details>` : ''}
       ${opts ? `<div class="options">${opts}</div>` : ''}
       <div class="own ${ci === q.options.length ? 'cursor' : ''}">
-        <textarea data-own="${q.id}" rows="1" placeholder="${q.options.length ? 'Other — in your own words…' : 'Your answer…'}">${esc(draft)}</textarea>
+        <textarea data-own="${q.id}" rows="1" placeholder="${q.kind === 'review' ? 'What to change, or anything that looks off…' : q.options.length ? 'Other — in your own words…' : 'Your answer…'}">${esc(draft)}</textarea>
       </div>
       <div class="actions">
         <button class="send" data-send="${q.id}" ${picked.size || draft.trim() ? '' : 'disabled'}>Send</button>
@@ -1205,6 +1341,16 @@
     feed.querySelectorAll('[data-take]').forEach((d) => {
       d.ontoggle = () => {
         d.open ? openTakes.add(d.dataset.take) : openTakes.delete(d.dataset.take);
+      };
+    });
+    const panel = document.getElementById('buildPanel');
+    if (panel) panel.ontoggle = () => { buildOpen = panel.open; };
+    // From a decision to the code it produced. Clicking the card underneath
+    // would re-open the answered question instead, so stop there.
+    feed.querySelectorAll('[data-goto]').forEach((b) => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        if (b.dataset.goto) gotoCard(b.dataset.goto);
       };
     });
   }

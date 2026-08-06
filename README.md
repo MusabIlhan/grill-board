@@ -20,11 +20,16 @@ contain the symptom, change a shared function or fork it, this instance or the
 class — with the actual code in each card. You end up in the code decision
 instead of describing the bug.
 
-Two things make it different from a chat prompt:
+Then it builds what you decided, on the same board.
+
+Three things make it different from a chat prompt:
 
 - **You are never blocked.** Questions queue on a board, not in the conversation.
 - **Questions are roomy.** Each card renders full markdown — code, tables,
   tradeoffs — so everything needed to answer is *in* the question.
+- **It doesn't end at agreement.** The board drains, the build appears on it
+  step by step, and every change comes back as a card carrying the answers that
+  produced it.
 
 ## Install
 
@@ -90,6 +95,42 @@ Tokyo Night, GitHub), light and dark. All 16 combinations were contrast-audited:
 every text pair clears WCAG AA, every glyph clears 3:1. Default is Nord dark; the
 choice persists across boards.
 
+## Building, and reviewing what got built
+
+A decision that never becomes code was a conversation, not an agreement. So the
+board doesn't stop when the questions do.
+
+When it drains, the plan goes up first and the header flips to **building** — a
+panel of steps that tick over as they land, each showing which answers it came
+from. The board is never blank while the session works.
+
+```
+Building what you decided                          2/4
+  ✓  Split retryable vs terminal in classifyError   q1 q3
+  ✓  Backfill the 41 stuck rows                        q2
+  ◐  Regression test for a 401 in the outbox           q1
+  ·  Re-test the other two classifyError callers       q3
+```
+
+Then every change comes back as a card. Not a diff on its own — a diff with
+**the questions that caused it and the answers you gave**, printed above it:
+
+> **Because you decided**
+> - **q1** A 4xx retries forever. Fix at the classifier or the queue?
+>   → Split classifyError — *"yes but keep the cap too"*
+
+Three answers: **looks right**, **change the code** (the decision stands, say
+what to fix — it's rewritten and the card reopens at revision 2), or **wrong
+call, reopen q1** (the code was faithful, the decision wasn't). Free text beats
+the button: *"looks right, but rename that flag"* is a rewrite, not an approval.
+
+Each answered question grows a `Built: c1` link, so a decision and its code are
+one click apart in both directions. The same three keys, the same voice client,
+the same board.
+
+`export` then writes the record — every decision, what it produced, every change
+with its diff and its verdict — which is the thing you actually keep.
+
 ## Answering out loud
 
 The board is also an MCP server, so another session — one with a voice mode, on
@@ -115,8 +156,9 @@ For a second session **on the same machine** there's no need for any of that:
 node board.mjs mcp --state <path>       # MCP over stdio
 ```
 
-Five tools: `list_questions`, `read_question`, `answer`, `ask_better`,
-`board_status`. What makes it work is that **`answer` takes free text** — you
+Seven tools: `list_questions`, `read_question`, `answer`, `ask_better`,
+`board_status`, plus `list_boards` / `use_board` for when several grills are
+running at once. What makes it work is that **`answer` takes free text** — you
 say *"the first one, but only if we log the discards"* and that sentence is
 recorded verbatim. Nothing tries to match it to an option key; the grilling
 session reads it exactly as it reads a typed note.
@@ -124,6 +166,10 @@ session reads it exactly as it reads a typed note.
 Each card carries a `spoken` line written for the ear — no file paths, no
 tables. `read_question` returns the full detail for when you ask for it, so the
 narrator never has to improvise from a code block.
+
+This covers the review too: `board_status` reports the build as it happens, and
+a review card's spoken detail is the change described in prose, never the diff.
+You can approve, redirect or reopen a decision without looking at anything.
 
 **`--token` is not optional once the board leaves your machine.** Without it the
 board is readable and *writable* by anyone who can reach the URL, which is a
@@ -138,7 +184,8 @@ and keyboard mid-board without telling either one.
 A ~600-line zero-dependency Node server and a single HTML page.
 
 ```
-board.mjs    server + CLI (serve, add, new, watch, retire, note, status, export)
+board.mjs    server + CLI (serve, add, new, watch, retire, note, status, export,
+                           build, change, review, mcp, gateway)
 board.html   the page
 SKILL.md     the instructions Claude follows
 ```

@@ -12,6 +12,12 @@
 //   node board.mjs export --state <path> [--out transcript.md]
 //   node board.mjs mcp    --state <path>            # MCP over stdio (also at POST /mcp)
 //   node board.mjs gateway [--port N] [--token]     # one stable URL that follows the current board
+//
+// After the questions drain the same board carries the work they decided:
+//   node board.mjs build  --state <path> --file <plan.json>          # declare the build
+//   node board.mjs build  --state <path> --step s2 --status done
+//   node board.mjs change --state <path> --file <changes.json>       # log what was written
+//   node board.mjs review --state <path>                             # hand each change back
 
 import { createServer } from 'node:http';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, statSync, renameSync } from 'node:fs';
@@ -140,10 +146,16 @@ function blank(title) {
     agentNoteAt: null,
     nextId: 1,
     nextEvent: 1,
+    nextChange: 1,
     cursor: 0,
     maxOpen: DEFAULT_MAX_OPEN,
     questions: [],
     events: [],
+    // A board outlives the grilling: once the questions drain it shows the work
+    // being built, then hands every change back for review.
+    phase: 'grilling',
+    build: null,
+    changes: [],
   };
 }
 
@@ -215,6 +227,11 @@ function mutate(p, fn) {
     const s = existsSync(p) ? load(p) : blank();
     const result = fn(s);
     promote(s);
+    // One counter the page can compare against, bumped by every write. Deriving
+    // it from question and event ids instead used to work, and stopped the
+    // moment a build step could change without either of them moving — the
+    // board then showed a build frozen at step one until something else landed.
+    s.rev = (s.rev || 0) + 1;
     save(p, s);
     return result;
   });
@@ -253,6 +270,14 @@ function addQuestions(s, list) {
       // READ — code, tables, file:line — and is unusable spoken, so the agent
       // authors the speakable form rather than leaving a narrator to guess.
       spoken: String(raw.spoken || '').trim(),
+      // A review card's `context` is a diff — unreadable aloud. This is the same
+      // change said in prose, so a voice client has something to read out when
+      // they ask what actually changed.
+      spokenDetail: String(raw.spokenDetail || '').trim(),
+      // 'review' cards are minted from the change log rather than written by
+      // hand, and answering one is a verdict on code rather than a decision.
+      kind: raw.kind || 'question',
+      changeId: raw.changeId || null,
       context: raw.context || '',
       recommendation: raw.recommendation || '',
       options: (raw.options || []).map((o, i) => ({
@@ -283,6 +308,156 @@ function addQuestions(s, list) {
   return added;
 }
 
+// ------------------------------------------------- build, changes, review
+// The point of the whole thing: a decision that never becomes code was a
+// conversation, not an agreement. So the board keeps going past the last
+// question — it shows the build happening, then hands each change back with
+// the decisions that produced it attached, and a review is done against those
+// rather than against a diff standing on its own.
+
+function ensureWork(s) {
+  if (!s.build) s.build = { startedAt: null, finishedAt: null, steps: [] };
+  if (!Array.isArray(s.changes)) s.changes = [];
+  if (!s.nextChange) s.nextChange = 1;
+  return s;
+}
+
+// What the user actually settled, rendered for the top of a review card. This
+// is the link that makes a review a review: without it you are asking someone
+// to approve a diff and remember, unaided, what they asked for.
+function decisionLine(s, qid) {
+  const q = s.questions.find((x) => x.id === qid);
+  if (!q) return `- \`${qid}\` — *(not on this board)*`;
+  const picked = (q.answer && q.answer.keys || [])
+    .map((k) => ((q.options || []).find((o) => o.key === k) || {}).label || k)
+    .join(' + ');
+  const said = q.answer && q.answer.text ? `“${q.answer.text}”` : '';
+  const decided = [picked, said].filter(Boolean).join(' — ') || '*never answered — this was my call*';
+  return `- **${qid}** ${q.title}\n  → ${decided}`;
+}
+
+// Fence long enough to survive its own contents. A diff of a markdown file
+// carries ``` lines, and a three-backtick fence around one ends the block early
+// — the rest of the diff then renders as prose, which reads as a broken card.
+function fenceFor(text) {
+  const runs = String(text).match(/`{3,}/g) || [];
+  return '`'.repeat(runs.reduce((m, r) => Math.max(m, r.length + 1), 3));
+}
+
+function reviewContext(s, c) {
+  const out = [];
+  if (c.summary) out.push(c.summary, '');
+  if ((c.files || []).length) out.push(`**Files** — ${c.files.map((f) => `\`${f}\``).join(', ')}`, '');
+  if ((c.because || []).length) {
+    out.push('**Because you decided**', '');
+    for (const qid of c.because) out.push(decisionLine(s, qid));
+    out.push('');
+  }
+  if (c.rev > 1) out.push(`*Revision ${c.rev} — rewritten after your last review.*`, '');
+  if (c.diff) {
+    const f = fenceFor(c.diff);
+    out.push(`${f}diff`, String(c.diff).replace(/\n+$/, ''), f);
+  }
+  return out.join('\n').trim();
+}
+
+// Explicit keys rather than a/b/c: the verdict then travels in the event itself,
+// so `watch`, `export` and the agent all read the same word for it.
+const VERDICTS = { ok: 'looks right', revise: 'change the code', reopen: 'reopen the decision' };
+
+function reviewCard(s, c) {
+  const primary = (c.because || [])[0];
+  return {
+    thread: 'Review',
+    kind: 'review',
+    changeId: c.id,
+    title: c.title,
+    spoken: c.spoken || `I've made this change: ${c.title}. Does that look right to you?`,
+    spokenDetail: c.summary || '',
+    context: reviewContext(s, c),
+    recommendation: c.risk || '',
+    options: [
+      { key: 'ok', label: 'Looks right', detail: 'Accepted as written.', recommended: true },
+      { key: 'revise', label: 'Change the code', detail: 'The decision stands — say what to change and I rewrite it.' },
+      ...(primary ? [{
+        key: 'reopen',
+        label: `Wrong call — reopen ${primary}`,
+        detail: `Sends ${primary} back to be decided again, and this gets rebuilt from the new answer.`,
+      }] : []),
+    ],
+  };
+}
+
+// The verdict on one change, or null while it is still out for review.
+function verdictOf(s, c) {
+  const q = s.questions.find((x) => x.id === c.reviewId);
+  if (!q || q.status !== 'answered' || !q.answer) return null;
+  const key = (q.answer.keys || [])[0] || null;
+  return { key, label: VERDICTS[key] || (key ? key : 'in their own words'), text: q.answer.text || '' };
+}
+
+function logChanges(s, list) {
+  ensureWork(s);
+  const added = [], updated = [], unlinked = [];
+  for (const raw of list) {
+    const title = String(raw.title || '').trim();
+    if (!title) continue;
+    const fields = {
+      title,
+      because: (raw.because || []).map(String),
+      files: (raw.files || []).map(String),
+      summary: raw.summary || '',
+      diff: raw.diff || '',
+      risk: raw.risk || '',
+      spoken: String(raw.spoken || '').trim(),
+      step: raw.step || null,
+    };
+    if (!fields.because.length) unlinked.push(title);
+    // Re-logging under the same id is the revise loop: the change is rewritten
+    // in place and its review card reopens with the new diff, so the history of
+    // one change stays one row instead of accumulating near-duplicates.
+    const existing = raw.id ? s.changes.find((x) => x.id === raw.id) : null;
+    if (existing) {
+      Object.assign(existing, fields, { rev: (existing.rev || 1) + 1, at: new Date().toISOString() });
+      const q = s.questions.find((x) => x.id === existing.reviewId);
+      if (q) {
+        // Rebuild the card wholesale rather than patching fields. A rewrite can
+        // change which decision it answers to, and the "reopen q4" option names
+        // that decision — patched piecemeal, it keeps pointing at the old one.
+        const fresh = reviewCard(s, existing);
+        Object.assign(q, {
+          status: 'open', openedAt: new Date().toISOString(), answer: null, ask: null,
+          title: fresh.title, spoken: fresh.spoken, spokenDetail: fresh.spokenDetail,
+          context: fresh.context, recommendation: fresh.recommendation,
+          options: fresh.options.map((o, i) => ({ key: o.key || String.fromCharCode(97 + i), label: o.label, detail: o.detail || '', recommended: !!o.recommended })),
+        });
+      }
+      updated.push(existing.id);
+    } else {
+      s.changes.push({ id: `c${s.nextChange++}`, ...fields, rev: 1, reviewId: null, at: new Date().toISOString() });
+      added.push(s.changes[s.changes.length - 1].id);
+    }
+  }
+  return { added, updated, unlinked };
+}
+
+function mintReviews(s) {
+  ensureWork(s);
+  const pending = s.changes.filter((c) => !c.reviewId && c.title);
+  s.build.finishedAt = s.build.finishedAt || new Date().toISOString();
+  s.phase = 'review';
+  if (!pending.length) return [];
+  // The queue exists so a grill cannot become a wall of forty prompts. A review
+  // set is different: it is finite, it is all of one thing, and revealing it a
+  // few at a time leaves you unable to tell whether you have seen the change
+  // that matters. So the cap is lifted to fit exactly this batch.
+  const openNow = s.questions.filter((q) => q.status === 'open').length;
+  s.maxOpen = Math.max(s.maxOpen || DEFAULT_MAX_OPEN, openNow + pending.length);
+  const ids = addQuestions(s, pending.map((c) => reviewCard(s, c)));
+  pending.forEach((c, i) => { c.reviewId = ids[i]; });
+  return ids;
+}
+
 // ------------------------------------------------------- recording answers
 // Shared by the HTTP API and the MCP tools, so a voice client and the page
 // cannot drift into recording answers differently.
@@ -297,7 +472,14 @@ function recordAnswer(p, body) {
       text: typeof body.text === 'string' && body.text.trim() ? body.text.trim() : null,
       at: new Date().toISOString(),
     };
-    pushEvent(cur, { type: 'answer', id: q.id, thread: q.thread, title: q.title, answer: q.answer });
+    pushEvent(cur, {
+      type: 'answer', id: q.id, thread: q.thread, title: q.title, answer: q.answer,
+      // Carried on the event so the agent can act on a review verdict without
+      // going back to look up which change the card belonged to.
+      kind: q.kind || 'question',
+      changeId: q.changeId || null,
+      because: q.changeId ? ((cur.changes || []).find((c) => c.id === q.changeId) || {}).because || [] : undefined,
+    });
     return { ok: true, id: q.id };
   });
 }
@@ -404,8 +586,12 @@ function describeQuestion(q, { full = false } = {}) {
   const lines = [`${q.id} · ${q.thread}`, q.spoken || q.title];
   if (full) {
     if (q.spoken && q.title !== q.spoken) lines.push('', `Question: ${q.title}`);
-    if (q.context) lines.push('', q.context);
-    if (q.recommendation) lines.push('', `Claude's take: ${q.recommendation}`);
+    // A review card's context is a diff. Read aloud that is noise, so the
+    // change's own prose stands in for it — the diff is on the page for anyone
+    // who is actually looking at one.
+    if (q.spokenDetail) lines.push('', q.spokenDetail, '', '(The diff itself is on the board — describe it, do not read it out.)');
+    else if (q.context) lines.push('', q.context);
+    if (q.recommendation) lines.push('', `Claude is least sure about: ${q.recommendation}`);
   }
   if (q.options.length) {
     lines.push('');
@@ -421,8 +607,21 @@ function callTool(p, name, a = {}) {
   if (name === 'list_questions') {
     const s = mcpRead(p);
     const open = s.questions.filter((q) => q.status === 'open');
-    if (!open.length) return `"${s.title}" — nothing open right now. Claude may still be writing; try again shortly.`;
-    return [`"${s.title}" — ${open.length} open.`, '', ...open.map((q) => describeQuestion(q) + '\n')].join('\n');
+    if (!open.length) {
+      if (s.phase === 'building') {
+        const b = s.build || { steps: [] };
+        const done = b.steps.filter((x) => x.status === 'done').length;
+        const now = b.steps.find((x) => x.status === 'running');
+        return `"${s.title}" — the questions are done and Claude is building: ${done} of ${b.steps.length} steps` +
+          `${now ? `, currently ${now.title}` : ''}. The changes come back here for review when it finishes.`;
+      }
+      return `"${s.title}" — nothing open right now. Claude may still be writing; try again shortly.`;
+    }
+    const reviewing = open.some((q) => q.kind === 'review');
+    return [
+      `"${s.title}" — ${open.length} open${reviewing ? '; these are finished changes to review, not decisions to make' : ''}.`,
+      '', ...open.map((q) => describeQuestion(q) + '\n'),
+    ].join('\n');
   }
   if (name === 'read_question') {
     const q = mcpRead(p).questions.find((x) => x.id === a.id);
@@ -462,7 +661,17 @@ function callTool(p, name, a = {}) {
   if (name === 'board_status') {
     const s = mcpRead(p);
     const c = counts(s);
-    return `"${s.title}": ${c.answered} answered, ${c.open} open, ${c.queued} still queued.`;
+    const base = `"${s.title}": ${c.answered} answered, ${c.open} open, ${c.queued} still queued.`;
+    if (s.phase === 'building' && s.build) {
+      const done = s.build.steps.filter((x) => x.status === 'done').length;
+      return `${base} The questions are done — Claude is building, ${done} of ${s.build.steps.length} steps.`;
+    }
+    if (s.phase === 'review') {
+      const out = (s.changes || []).filter((ch) => ch.reviewId);
+      const left = out.filter((ch) => !verdictOf(s, ch)).length;
+      return `${base} Reviewing ${out.length} change${out.length === 1 ? '' : 's'} — ${left} still without a verdict.`;
+    }
+    return base;
   }
   throw new Error(`unknown tool: ${name}`);
 }
@@ -486,7 +695,11 @@ function handleRpc(p, msg) {
         'A board of open questions someone is answering out loud. Ask ONE at a time, in your own words, using the ' +
         'spoken line. Let them answer however they like and record what they actually said — do not push them ' +
         'towards the listed choices, and never answer for them. If they want the detail, read_question. If they ' +
-        'cannot answer it as written, ask_better rather than pressing.',
+        'cannot answer it as written, ask_better rather than pressing. ' +
+        'Once the questions run out Claude builds what they decided, and the finished changes come back to this ' +
+        'same board as review cards. Those are not decisions — each one is code that already exists, and the ' +
+        'three answers are: it looks right, change the code, or the decision behind it was wrong. Never read a ' +
+        'diff aloud; describe what changed and let them ask.',
     });
   }
   if (method === 'ping') return rpcOk(id, {});
@@ -651,7 +864,15 @@ function makeHandler(boardPath) {
           agentNote: cur.agentNote,
           agentNoteAt: cur.agentNoteAt,
           maxOpen: cur.maxOpen,
-          rev: cur.nextId * 1e6 + cur.nextEvent,
+          phase: cur.phase || 'grilling',
+          build: cur.build || null,
+          // The diffs are already inside the review cards; this is the index the
+          // page uses to hang "→ built c3" off the decision that caused it.
+          changes: (cur.changes || []).map((c) => ({
+            id: c.id, title: c.title, because: c.because || [], files: c.files || [],
+            reviewId: c.reviewId, rev: c.rev || 1, step: c.step || null,
+          })),
+          rev: cur.rev || cur.nextId * 1e6 + cur.nextEvent,
           questions: cur.questions,
         });
       }
@@ -778,6 +999,13 @@ function describe(ev) {
   if (ev.type === 'answer') {
     const picked = (ev.answer.keys || []).join(',') || '—';
     const note = ev.answer.text ? ` note: ${JSON.stringify(ev.answer.text.slice(0, 120))}` : '';
+    // A verdict on code is a different job from an answer to a question, and
+    // the wake has to say which — one branches a thread, the other rewrites a file.
+    if (ev.kind === 'review') {
+      const verdict = VERDICTS[(ev.answer.keys || [])[0]] || 'in their own words';
+      const from = (ev.because || []).length ? ` from ${ev.because.join(',')}` : '';
+      return `[review] ${ev.changeId}${from} — ${verdict}${note}`;
+    }
     return `[answer] ${ev.id} (${ev.thread}) picked ${picked}${note}`;
   }
   if (ev.type === 'ask') {
@@ -827,7 +1055,23 @@ async function cmdWatch() {
     }
     const c = counts(s);
     if (c.open === 0 && c.queued === 0 && s.questions.length && !announcedDrain) {
-      process.stdout.write(`[drained] board empty — ${c.answered} answered\n`);
+      // The board drains twice — once when the questions run out and the build
+      // should start, once when every change has a verdict. They call for
+      // opposite work, so they are not the same line.
+      const reviewed = (s.changes || []).filter((x) => x.reviewId);
+      if (s.phase === 'review' && reviewed.length) {
+        const tally = { ok: 0, revise: 0, reopen: 0, other: 0 };
+        for (const ch of reviewed) {
+          const v = verdictOf(s, ch);
+          tally[v && tally[v.key] !== undefined ? v.key : 'other']++;
+        }
+        process.stdout.write(
+          `[reviewed] ${tally.ok} accepted, ${tally.revise} to change, ${tally.reopen} to re-decide` +
+          `${tally.other ? `, ${tally.other} answered in their own words` : ''}\n`
+        );
+      } else {
+        process.stdout.write(`[drained] board empty — ${c.answered} answered\n`);
+      }
       announcedDrain = true;
     }
     await sleep(1000);
@@ -835,6 +1079,81 @@ async function cmdWatch() {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ------------------------------------------------------- build / review cli
+
+const STEP_STATUS = ['pending', 'running', 'done', 'failed'];
+
+function cmdBuild() {
+  const p = statePath();
+  if (args.step) {
+    const status = String(args.status || 'done');
+    if (!STEP_STATUS.includes(status)) die(`--status must be one of ${STEP_STATUS.join(', ')}`);
+    const out = mutate(p, (s) => {
+      ensureWork(s);
+      const st = s.build.steps.find((x) => x.id === args.step);
+      if (!st) return null;
+      st.status = status;
+      if (args.note !== undefined) st.note = String(args.note);
+      st.at = new Date().toISOString();
+      return st;
+    });
+    if (!out) die(`no build step ${args.step}`);
+    process.stdout.write(`${out.id} ${out.status}\n`);
+    return;
+  }
+
+  const src = args.file === '-' || !args.file ? readFileSync(0, 'utf8') : readFileSync(resolve(args.file), 'utf8');
+  let list;
+  try { list = JSON.parse(src); } catch (e) { die(`build plan JSON is invalid: ${e.message}`); }
+  if (!Array.isArray(list)) list = [list];
+  const ids = mutate(p, (s) => {
+    ensureWork(s);
+    s.phase = 'building';
+    s.build.startedAt = s.build.startedAt || new Date().toISOString();
+    const added = [];
+    for (const raw of list) {
+      const title = String(raw.title || '').trim();
+      if (!title) continue;
+      const id = `s${s.build.steps.length + 1}`;
+      s.build.steps.push({
+        id, title,
+        because: (raw.because || []).map(String),
+        status: 'pending', note: raw.note || '', at: null,
+      });
+      added.push(id);
+    }
+    return added;
+  });
+  process.stdout.write(`building — ${ids.length} step${ids.length === 1 ? '' : 's'}: ${ids.join(' ')}\n`);
+}
+
+function cmdChange() {
+  const p = statePath();
+  const src = args.file === '-' || !args.file ? readFileSync(0, 'utf8') : readFileSync(resolve(args.file), 'utf8');
+  let list;
+  try { list = JSON.parse(src); } catch (e) { die(`changes JSON is invalid: ${e.message}`); }
+  if (!Array.isArray(list)) list = [list];
+  const out = mutate(p, (s) => logChanges(s, list));
+  const bits = [];
+  if (out.added.length) bits.push(`logged ${out.added.join(' ')}`);
+  if (out.updated.length) bits.push(`rewrote ${out.updated.join(' ')} — their reviews reopened`);
+  process.stdout.write(`${bits.join('; ') || 'nothing to log'}\n`);
+  // A change with no `because` is one nobody asked for. That is allowed —
+  // groundwork exists — but it must be visible rather than quietly unlinked.
+  for (const t of out.unlinked) process.stderr.write(`  no "because": ${t}\n`);
+}
+
+function cmdReview() {
+  const p = statePath();
+  const ids = mutate(p, (s) => mintReviews(s));
+  const s = load(p);
+  process.stdout.write(
+    ids.length
+      ? `${ids.length} change${ids.length === 1 ? '' : 's'} up for review: ${ids.join(' ')}\n`
+      : `nothing new to review (${(s.changes || []).length} change(s) already out)\n`
+  );
+}
 
 function cmdRetire() {
   const p = statePath();
@@ -864,22 +1183,38 @@ function cmdStatus() {
   const s = load(statePath());
   const c = counts(s);
   const threads = [...new Set(s.questions.map((q) => q.thread))];
-  process.stdout.write(
-    `${s.title}\n` +
+  let out =
+    `${s.title}  [${s.phase || 'grilling'}]\n` +
     `  open ${c.open} · queued ${c.queued} · answered ${c.answered} · retired ${c.retired}\n` +
     `  threads: ${threads.join(', ')}\n` +
-    `  unread events: ${s.events.filter((e) => e.n > (s.cursor || 0)).length}\n`
-  );
+    `  unread events: ${s.events.filter((e) => e.n > (s.cursor || 0)).length}\n`;
+  if (s.build && s.build.steps.length) {
+    const done = s.build.steps.filter((x) => x.status === 'done').length;
+    out += `  build: ${done}/${s.build.steps.length} steps\n`;
+    for (const st of s.build.steps) out += `    ${st.status === 'done' ? '✓' : st.status === 'running' ? '◐' : st.status === 'failed' ? '✕' : '·'} ${st.id} ${st.title}\n`;
+  }
+  if ((s.changes || []).length) {
+    out += `  changes: ${s.changes.length}\n`;
+    for (const ch of s.changes) {
+      const v = verdictOf(s, ch);
+      out += `    ${ch.id} ${ch.title}  (${(ch.because || []).join(',') || 'unlinked'}) — ${v ? v.label : ch.reviewId ? 'awaiting review' : 'not sent for review'}\n`;
+    }
+  }
+  process.stdout.write(out);
 }
 
 function cmdExport() {
   const s = load(statePath());
   const lines = [`# ${s.title}`, ''];
   if (s.subtitle) lines.push(s.subtitle, '');
-  const threads = [...new Set(s.questions.map((q) => q.thread))];
+  // Review cards are the change log wearing a card, so they are written out
+  // under the changes rather than twice.
+  const asked = s.questions.filter((q) => q.kind !== 'review');
+  const builtFrom = (qid) => (s.changes || []).filter((c) => (c.because || []).includes(qid));
+  const threads = [...new Set(asked.map((q) => q.thread))];
   for (const t of threads) {
     lines.push(`## ${t}`, '');
-    for (const q of s.questions.filter((x) => x.thread === t)) {
+    for (const q of asked.filter((x) => x.thread === t)) {
       // Depth reads as heading level, not leading spaces — indented content
       // under an indented heading turns into a code block in strict parsers.
       const hashes = '#'.repeat(Math.min(3 + (q.depth || 0), 6));
@@ -897,6 +1232,9 @@ function cmdExport() {
         lines.push('**Unanswered**');
       }
       if (q.ask) lines.push(`**Asked for ${q.ask.kind}.**`);
+      // The forward link. Reading a decision, you can see what it turned into.
+      const built = builtFrom(q.id);
+      if (built.length) lines.push(`**Built:** ${built.map((c) => `${c.id} — ${c.title}`).join('; ')}`);
       lines.push('');
     }
   }
@@ -905,6 +1243,43 @@ function cmdExport() {
     lines.push('## Notes from the user', '');
     for (const m of messages) lines.push(`- ${m.text}`);
     lines.push('');
+  }
+
+  if (s.build && s.build.steps.length) {
+    lines.push('## The build', '');
+    for (const st of s.build.steps) {
+      const mark = { done: 'x', running: '~', failed: '!', pending: ' ' }[st.status] || ' ';
+      lines.push(`- [${mark}] **${st.id}** ${st.title}` +
+        `${(st.because || []).length ? ` *(${st.because.join(', ')})*` : ''}` +
+        `${st.note ? ` — ${st.note}` : ''}`);
+    }
+    lines.push('');
+  }
+
+  if ((s.changes || []).length) {
+    lines.push('## What was built', '');
+    for (const c of s.changes) {
+      lines.push(`### ${c.id} — ${c.title}`, '');
+      if (c.rev > 1) lines.push(`*Revision ${c.rev}.*`, '');
+      if (c.summary) lines.push(c.summary, '');
+      if ((c.files || []).length) lines.push(`**Files** — ${c.files.map((f) => `\`${f}\``).join(', ')}`, '');
+      // The back link, and the reason this file is a record rather than a diff
+      // dump: every change says which decision it came from and what that
+      // decision was, so it can be audited long after the board is gone.
+      if ((c.because || []).length) {
+        lines.push('**Because you decided**', '');
+        for (const qid of (c.because || [])) lines.push(decisionLine(s, qid));
+        lines.push('');
+      } else {
+        lines.push('**Not tied to any question** — groundwork.', '');
+      }
+      const v = verdictOf(s, c);
+      lines.push(`**Review:** ${v ? v.label : c.reviewId ? 'still out' : 'not sent'}${v && v.text ? ` — “${v.text}”` : ''}`, '');
+      if (c.diff) {
+        const f = fenceFor(c.diff);
+        lines.push(`${f}diff`, String(c.diff).replace(/\n+$/, ''), f, '');
+      }
+    }
   }
   const md = lines.join('\n');
   if (args.out) { writeFileSync(resolve(args.out), md); process.stdout.write(`wrote ${resolve(args.out)}\n`); }
@@ -967,10 +1342,11 @@ async function cmdMcp() {
 const verbs = {
   serve, add: cmdAdd, new: cmdNew, watch: cmdWatch, retire: cmdRetire,
   note: cmdNote, status: cmdStatus, export: cmdExport, mcp: cmdMcp, gateway: cmdGateway,
+  build: cmdBuild, change: cmdChange, review: cmdReview,
 };
 
 if (!cmd || !verbs[cmd]) {
-  process.stderr.write('usage: board.mjs <serve|add|new|watch|retire|note|status|export|mcp|gateway> --state <path>\n');
+  process.stderr.write('usage: board.mjs <serve|add|new|watch|retire|note|status|export|mcp|gateway|build|change|review> --state <path>\n');
   process.exit(1);
 }
 await verbs[cmd]();
