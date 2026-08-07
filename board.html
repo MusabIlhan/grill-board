@@ -511,6 +511,25 @@
   .empty { text-align: center; color: var(--ink-3); padding: 60px 20px; font-size: 14px; }
   .empty .big { font-size: 15px; color: var(--ink-2); margin-bottom: 6px; }
 
+  /* The board says what it is doing between the last answer and the first
+     review card. That stretch used to be blank — the questions were gone, the
+     changes had not arrived, and nothing on the page said work was happening or
+     that anything was coming back. It is derived from state on every poll, so
+     it appears whether or not the session remembers to announce itself. */
+  .working { display: flex; align-items: flex-start; gap: 11px; padding: 14px 18px 16px; margin: 0 0 4px; }
+  .working .lines { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .working .lead { font-size: 14px; color: var(--ink-2); }
+  .working .sub { font-size: 12.5px; color: var(--ink-3); }
+  .working .sub.warn { color: var(--warn); }
+  .working.stale .pulse { background: var(--danger); animation: none; }
+  .working.stale .lead { color: var(--danger); }
+  .working .pulse {
+    flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+    margin-top: 7px; animation: breathe 2.2s ease-in-out infinite;
+  }
+  @keyframes breathe { 0%, 100% { opacity: .25 } 50% { opacity: 1 } }
+  @media (prefers-reduced-motion: reduce) { .working .pulse { animation: none; opacity: .8 } }
+
   /* ---------------------------------------------------------- msgbox */
   dialog {
     border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel);
@@ -755,6 +774,11 @@
   let build = null;
   let changes = [];
   let workers = {};       // name -> { lastSeen, note } for agents sharing the build
+  // Bumped in board.mjs alongside NEEDS_API here whenever /api/state gains a
+  // field this page relies on, so a server left running across the change is
+  // caught rather than silently serving less than the page draws.
+  const NEEDS_API = 3;
+  let serverApi = NEEDS_API;   // assume current until a payload says otherwise
   let buildOpen = null;        // null = follow the phase; true/false once toggled
   let lastRev = null;
   let seenIds = new Set();
@@ -861,6 +885,7 @@
       live.classList.toggle('stale', age > 120000);
     } else live.hidden = true;
 
+    serverApi = s.api || 0;
     phase = s.phase || 'grilling';
     build = s.build || null;
     changes = s.changes || [];
@@ -909,7 +934,10 @@
     return `<details class="build" id="buildPanel" ${open ? 'open' : ''}>
       <summary>${esc(head)}<span class="tally">${done}/${steps.length}${failed ? ` · ${failed} failed` : ''}</span></summary>
       <div class="steps">${steps.map((st) => {
-        const w = st.owner || (st.status === 'done' ? st.doneBy : null);
+        // Same rule as a change's author: a name is only information when there
+        // is more than one of them. A solo build stamps every step with the
+        // session's own fallback id, which tells the reader nothing.
+        const w = crew.length > 1 ? st.owner || (st.status === 'done' ? st.doneBy : null) : null;
         const blocked = st.status === 'pending' ? waitsOn(st) : [];
         return `<div class="step ${esc(st.status)}">
           <span class="mark">${MARK[st.status] || '·'}</span>
@@ -943,6 +971,69 @@
       return '<div class="empty"><div class="big">Everything reviewed.</div>Nothing left waiting on you.</div>';
     }
     return '<div class="empty"><div class="big">No questions yet.</div>Claude is still reading. They will appear here.</div>';
+  }
+
+  const ago = (iso) => {
+    if (!iso) return null;
+    const m = Math.floor((Date.now() - Date.parse(iso)) / 60000);
+    return m < 1 ? 'just now' : m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ago`;
+  };
+
+  // What is happening right now, in the gap where the board used to go quiet.
+  // Everything here is derived from state the board already has — no `note`, no
+  // announcement, nothing the session has to remember to do. It renders ABOVE
+  // the answered cards rather than in place of them, which is why the old
+  // empty-state copy never appeared: after a grill the feed is never empty.
+  function workingStrip(open, queued) {
+    // A board can run for hours while board.mjs is edited under it, and a serve
+    // process keeps the code it booted with. When that happens the state file
+    // fills up with a build the payload never mentions, and the page has no way
+    // to tell that from a session doing nothing — which is exactly how one real
+    // ten-step build was watched, in full, by someone who saw an idle board.
+    if ((serverApi || 0) < NEEDS_API) {
+      return '<div class="working stale"><span class="pulse"></span><span class="lines">' +
+        '<span class="lead">This board\'s server is older than this page.</span>' +
+        '<span class="sub">It cannot send the build or the changes, so anything Claude ' +
+        'is doing will not appear here. Restarting the board fixes it — the answers are safe ' +
+        'in the state file.</span></span></div>';
+    }
+    const steps = build ? build.steps : [];
+    const stamps = [...steps.map((x) => x.at), ...changes.map((c) => c.at)].filter(Boolean).sort();
+    const moved = stamps[stamps.length - 1] || null;
+    const line = (lead, sub, warn) =>
+      `<div class="working"><span class="pulse"></span><span class="lines">` +
+      `<span class="lead">${lead}</span><span class="sub${warn ? ' warn' : ''}">${sub}</span></span></div>`;
+
+    if (phase === 'building') {
+      const done = steps.filter((x) => x.status === 'done').length;
+      const sent = changes.length;
+      const bits = [`${done} of ${steps.length} steps`];
+      // The panel promises every change comes back to review. Saying how many
+      // actually have keeps that promise checkable — a build that is ticking
+      // steps off and sending nothing back looks identical to one that is
+      // working, right up until it says it has finished and you have seen none.
+      bits.push(sent ? `${sent} change${sent === 1 ? '' : 's'} sent for review` : 'nothing sent for review yet');
+      if (moved) bits.push(`last moved ${ago(moved)}`);
+      // The promise is restated on every poll rather than announced once,
+      // because the question being asked is not "what happened" — it is "is
+      // anything still coming".
+      return line('Building what you decided — each change comes back here to review.',
+        bits.join(' · '), done > 0 && !sent);
+    }
+    if (phase === 'review') {
+      const waiting = questions.filter((q) => q.kind === 'review' && q.status === 'open').length;
+      if (waiting) return '';   // the cards below say it better than a sentence would
+      return line('Everything reviewed.', 'Nothing left waiting on you.');
+    }
+    // Still grilling, but there is nothing left to answer: the session has the
+    // last answer and has not put a plan up yet. This is the stretch the board
+    // was silent for, and the one the user notices.
+    if (!open && !queued && questions.length) {
+      const last = questions.filter((q) => q.answer).map((q) => q.answer.at).sort().pop();
+      return line('Nothing left to answer.',
+        `Claude is reading your answers — what gets built appears here next${last ? ` · last answer ${ago(last)}` : ''}`);
+    }
+    return '';
   }
 
   // Depth-first by parent, so a follow-up sits directly under the answer that
@@ -1170,7 +1261,7 @@
     const threads = [];
     for (const q of live) if (!threads.includes(q.thread)) threads.push(q.thread);
 
-    const html = [buildPanel()];
+    const html = [buildPanel(), workingStrip(open, queued)];
     if (!live.length) html.push(emptyState());
     for (const t of threads) {
       const inThread = orderThread(live.filter((q) => q.thread === t));

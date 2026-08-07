@@ -1,16 +1,17 @@
 #!/bin/bash
-# The claim protocol, exercised for real: five processes racing for three steps,
-# a dependency gate, an ownership check, a steal, and per-agent event routing.
+# The build protocol, exercised for real: five processes racing for three steps,
+# a dependency gate, an ownership check, a steal, per-agent event routing, and
+# the handoff from a finished build to a review.
 #
-#   ./test-claim.sh
+#   ./test-build.sh
 #
-# This is the one part of the board that cannot be verified by looking at it.
+# This is the part of the board that cannot be verified by looking at it.
 # Everything else shows up on the page when it breaks; a claim that stopped
 # being exclusive looks exactly like one that still is, right up until two
 # agents edit the same file. So it gets a test and the rest do not.
 set -u
 B="$(cd "$(dirname "$0")" && pwd)/board.mjs"
-ROOT=$(mktemp -d "${TMPDIR:-/tmp}/grill-claim.XXXXXX")
+ROOT=$(mktemp -d "${TMPDIR:-/tmp}/grill-build.XXXXXX")
 trap 'rm -rf "$ROOT"' EXIT
 S="$ROOT/state.json"
 PORT=${PORT:-7896}
@@ -92,13 +93,38 @@ is "ask on a review card too"   "$(node "$B" new --state "$S" --as w9 --mine | g
 is "still nobody else"          "$(node "$B" new --state "$S" --as "$holder" --mine | grep -c simpler)" "0"
 kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
 
-echo '== drained'
-for s in s1 s2 s3 s4 s5; do
+echo '== drained, and the handoff to review'
+for s in s1 s2 s3 s4; do
   node "$B" claim --state "$S" --as mop --steal $s >/dev/null 2>&1
   node "$B" build --state "$S" --step $s --status done --as mop >/dev/null 2>&1
 done
+node "$B" claim --state "$S" --as mop --steal s5 >/dev/null 2>&1
+node "$B" build --state "$S" --step s5 --status done --as mop >/dev/null 2>&1
 node "$B" claim --state "$S" --as mop >"$ROOT/drain.out" 2>&1; is "all done exits 0" "$?" "0"
 is "and says so" "$(cat "$ROOT/drain.out")" "every step is done"
+
+# Nobody calls `review`. Settling the LAST step has to send the changes up, or a
+# build that finishes ends in silence — the whole failure this exists to
+# prevent, and one that is invisible from the page until you go looking.
+echo '== a finished build hands itself back'
+S2="$ROOT/handoff.json"
+echo '[{"title":"Fix it?","options":[{"key":"a","label":"Yes"}]}]' | node "$B" add --state "$S2" >/dev/null
+echo '[{"title":"Do the thing","because":["q1"]}]' | node "$B" build --state "$S2" >/dev/null
+echo '[{"title":"Did the thing","because":["q1"],"summary":"It is done.","diff":"+ done"}]' \
+  | node "$B" change --state "$S2" >/dev/null
+node "$B" build --state "$S2" --step s1 --status done >"$ROOT/last.out" 2>&1
+is "last step sends changes up" "$(grep -c 'up for review' "$ROOT/last.out")" "1"
+is "and flips the phase"        "$(node "$B" status --state "$S2" | grep -c '\[review\]')" "1"
+
+echo '== a build that logged nothing'
+S3="$ROOT/empty.json"
+echo '[{"title":"Fix it?","options":[{"key":"a","label":"Yes"}]}]' | node "$B" add --state "$S3" >/dev/null
+echo '[{"title":"Do the thing","because":["q1"]}]' | node "$B" build --state "$S3" >/dev/null
+node "$B" build --state "$S3" --step s1 --status done >"$ROOT/owed.out" 2>&1
+# "Everything reviewed" over a board that was shown no code is worse than the
+# silence it replaces, so this case must NOT flip the phase.
+is "stays in building" "$(node "$B" status --state "$S3" | grep -c '\[building\]')" "1"
+is "and says what it owes" "$(grep -c 'NO change has been logged' "$ROOT/owed.out")" "1"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]

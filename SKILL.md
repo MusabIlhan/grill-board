@@ -146,8 +146,19 @@ A decision that never becomes code was a conversation, not an agreement. So the
 board keeps going: it shows the build happening, then hands every change back
 with the decisions that produced it attached.
 
-**1. Post the plan before you write a line of it.** This is the same rule as
-seeding cheap questions first — the board must never sit empty while you work.
+**1. Post the plan before you write a line of it.** Not before the first edit —
+before the first *read*. The moment you judge the questions to be over, the plan
+goes up; only then do you start opening files. This is the same rule as seeding
+cheap questions first, and it is the one most easily lost, because between the
+last answer and the first step there is real thinking to do and the board is
+watching you do it.
+
+They have just answered twenty questions and are sitting on a page that went
+quiet. The board fills that silence on its own — the moment the last card is
+answered it says *"nothing left to answer — Claude is reading your answers"* and
+starts counting the minutes. Treat that as the floor, not the job: it can say
+that work is happening, but only your plan says **what**, and only the plan tells
+them a review is coming.
 
 ```bash
 node ~/.claude/skills/grill-board/board.mjs build --state "$S" --file - <<'JSON'
@@ -173,19 +184,33 @@ node ~/.claude/skills/grill-board/board.mjs build --state "$S" --step s1 --statu
 node ~/.claude/skills/grill-board/board.mjs build --state "$S" --step s1 --status done --note "3 callers re-tested"
 ```
 
-**3. Log each change the moment it lands.** Write the JSON with the `Write` tool
-rather than a heredoc — a diff is full of quotes, backslashes and newlines, and
-hand-escaping it into a shell string is a turn wasted every time.
+**3. Log each change the moment it lands** — in the same breath as marking its
+step done, not batched at the end. A step marked done with no change logged is
+the board's worst state: it reports progress and shows none of it, and the
+person watching has no way to tell a build that is going well from one that is
+going wrong. The board says so out loud once it happens (*"nothing sent for
+review yet"*), which is a symptom, not a fix.
+
+Write the JSON with the `Write` tool rather than a heredoc — a diff is full of
+quotes, backslashes and newlines, and hand-escaping it into a shell string is a
+turn wasted every time.
 
 ```bash
 node ~/.claude/skills/grill-board/board.mjs change --state "$S" --file /tmp/c1.json
 ```
 
-**4. When the build is done, hand it back.**
+**4. Hand it back.** Marking the **last** step settled does this for you: the
+changes go up for review and the board flips to `review` in the same write, so a
+finished build cannot end in silence. Run it by hand only to send changes up
+before the build is over.
 
 ```bash
 node ~/.claude/skills/grill-board/board.mjs review --state "$S"
 ```
+
+The one case it cannot rescue is a build that logged nothing — there is then
+nothing to review, and rather than claim otherwise the board stays in `building`
+and tells you the changes you owe.
 
 Every logged change becomes a card carrying its summary, its files, **the
 decisions that caused it with the answers they gave**, and the diff. The queue
@@ -434,6 +459,13 @@ thread ends when the next question would not change what gets built.
   refuses that — if it tells you a different grill is already there, choose a
   new path. `--adopt` joins an existing board on purpose, which is only ever
   what you want when you *are* the second agent on one build.
+- **If a command warns that the server is older than board.mjs, restart it
+  before doing anything else.** A `serve` process keeps whatever code it booted
+  with, so a board running across an update to this skill can accept every write
+  and serve none of it — the state file fills with a build the page is never
+  told about, and the board looks idle while you work. The warning prints the
+  exact `kill … && … serve … --adopt &` to run. Nothing is lost; the state file
+  is the truth and the new server reads it.
 
 ## Command reference
 

@@ -104,6 +104,14 @@ When it drains, the plan goes up first and the header flips to **building** — 
 panel of steps that tick over as they land, each showing which answers it came
 from. The board is never blank while the session works.
 
+It doesn't rely on being told, either. The moment the last card is answered the
+board says so itself — *"nothing left to answer, Claude is reading your
+answers"* — and once the build starts it keeps a running count of steps done
+against changes actually sent back, so a build that is ticking off steps and
+handing you nothing to look at says so instead of looking healthy. Settling the
+last step sends the changes up on its own; a finished build cannot end in
+silence.
+
 ```
 Building what you decided                          2/4
   ✓  Split retryable vs terminal in classifyError   q1 q3
@@ -213,7 +221,7 @@ board.mjs      server + CLI (serve, add, new, watch, retire, note, status, expor
                              build, change, review, claim, release, mcp, gateway)
 board.html     the page
 SKILL.md       the instructions Claude follows
-test-claim.sh  the claim protocol, raced for real
+test-build.sh  the build protocol, raced for real
 ```
 
 State is one JSON file per board. The CLI writes questions into it, the page

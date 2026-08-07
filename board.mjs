@@ -28,6 +28,16 @@ import { networkInterfaces, homedir } from 'node:os';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_MAX_OPEN = 8;
 
+// The page is re-read from disk on every load, but a `serve` process is not —
+// it runs whatever board.mjs was on disk when it started. Boards here run for
+// hours while this file is edited, so a server can end up serving a payload the
+// page it just handed out no longer understands, and it does it in complete
+// silence: the state file has a ten-step build in it, `/api/state` never
+// mentions it, and the board looks as if nothing is happening. That is not a
+// hypothetical — it is how a whole build went unseen. Bump this whenever
+// /api/state gains a field the page depends on.
+const API = 3;
+
 // Which board is live right now. Every `serve` claims it, so a long-running
 // gateway — and the connector URL registered against it — follows whatever
 // grill is currently going, instead of being nailed to one session's state file.
@@ -64,9 +74,24 @@ function registerBoard(p, title, port) {
       try { process.kill(b.pid, 0); } catch { continue; } // its server is gone
       all[path] = b;
     }
-    all[p] = { title: title || 'Grill board', port, pid: process.pid, at: new Date().toISOString() };
+    all[p] = { title: title || 'Grill board', port, pid: process.pid, api: API, at: new Date().toISOString() };
     writeFileSync(BOARDS, JSON.stringify(all, null, 2));
   } catch { /* a registry failure must not stop a board */ }
+}
+
+// Called after anything the page can only show if the server understands it.
+// The write itself always succeeds — the state file is the source of truth —
+// so without this the session has no way to know its work is invisible.
+function warnStaleServer(p) {
+  const b = readRegistry()[p];
+  if (!b || !b.pid) return;
+  try { process.kill(b.pid, 0); } catch { return; }   // not running; nothing to warn about
+  if ((b.api || 0) >= API) return;
+  process.stderr.write(
+    `  NOTE this board's server (pid ${b.pid}, port ${b.port}) started before this version of\n` +
+    `       board.mjs and cannot serve what you just wrote — the page will not show it.\n` +
+    `       Restart it:  kill ${b.pid} && node ${join(HERE, 'board.mjs')} serve --state "${p}" --port ${b.port} --adopt &\n`
+  );
 }
 
 function liveBoards() {
@@ -915,6 +940,7 @@ function makeHandler(boardPath) {
         const cur = load(p);
         // The cursor is the agent's bookkeeping; the page never needs it.
         return json(res, 200, {
+          api: API,
           boardId: cur.boardId || 'legacy',
           prefs: loadPrefs(),
           title: cur.title,
@@ -929,6 +955,7 @@ function makeHandler(boardPath) {
           changes: (cur.changes || []).map((c) => ({
             id: c.id, title: c.title, because: c.because || [], files: c.files || [],
             reviewId: c.reviewId, rev: c.rev || 1, step: c.step || null, author: c.author || null,
+            at: c.at || null,
           })),
           workers: cur.workers || {},
           rev: cur.rev || cur.nextId * 1e6 + cur.nextEvent,
@@ -1218,11 +1245,31 @@ function cmdBuild() {
       // Finishing or failing hands the step back; the holder is kept for the
       // record, but `owner` is what "someone is on this right now" means.
       if (status === 'done' || status === 'failed') { st.doneBy = st.owner || me; st.owner = null; }
-      return st;
+      // Marking the last step settled ends the build, so the changes go up for
+      // review here rather than waiting for someone to remember `review`. The
+      // promise the board makes — "every change comes back to you" — cannot be
+      // one more thing the session has to do; a build that finishes silently
+      // with eight unreviewed changes is exactly what it was built to prevent.
+      const settled = s.build.steps.every((x) => x.status === 'done' || x.status === 'failed');
+      // With nothing logged there is nothing to review, and flipping the phase
+      // would put "Everything reviewed" on a board that has been shown no code
+      // at all — worse than the silence it replaces. So that case stays in
+      // `building` and is reported as the debt it is.
+      const logged = s.changes.filter((c) => c.title).length;
+      const minted = settled && logged ? mintReviews(s) : [];
+      return { ...st, minted, owed: settled && !logged };
     });
     if (!out) die(`no build step ${args.step}`);
     if (out.denied) die(out.denied);
     process.stdout.write(`${out.id} ${out.status}\n`);
+    if (out.minted.length) {
+      process.stdout.write(`build finished — ${out.minted.length} change${out.minted.length === 1 ? '' : 's'} up for review: ${out.minted.join(' ')}\n`);
+    }
+    warnStaleServer(p);
+    if (out.owed) {
+      process.stdout.write('every step is settled and NO change has been logged — there is nothing to review.\n' +
+        '  Log what you wrote with `change`, one entry per change, each naming the questions behind it.\n');
+    }
     return;
   }
 
@@ -1255,6 +1302,7 @@ function cmdBuild() {
     return added;
   });
   process.stdout.write(`building — ${ids.length} step${ids.length === 1 ? '' : 's'}: ${ids.join(' ')}\n`);
+  warnStaleServer(p);
 }
 
 // Take one step, exclusively. This is the whole concurrency story: the pick and
@@ -1362,6 +1410,7 @@ function cmdChange() {
   // A change with no `because` is one nobody asked for. That is allowed —
   // groundwork exists — but it must be visible rather than quietly unlinked.
   for (const t of out.unlinked) process.stderr.write(`  no "because": ${t}\n`);
+  warnStaleServer(p);
 }
 
 function cmdReview() {
@@ -1373,6 +1422,7 @@ function cmdReview() {
       ? `${ids.length} change${ids.length === 1 ? '' : 's'} up for review: ${ids.join(' ')}\n`
       : `nothing new to review (${(s.changes || []).length} change(s) already out)\n`
   );
+  warnStaleServer(p);
 }
 
 function cmdRetire() {
