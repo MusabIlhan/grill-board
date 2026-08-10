@@ -464,6 +464,15 @@
   }
   .step.done .who { color: var(--ink-3); background: var(--panel-2); border-color: var(--line); }
   .step .waits { flex: none; font-size: 11px; color: var(--ink-3); margin-left: 8px; }
+  /* Sits under its step, indented past the mark, so a run of them reads as one
+     agent thinking out loud rather than as more steps. */
+  .said {
+    font-size: 12px; color: var(--ink-3); line-height: 1.45;
+    padding: 1px 18px 1px 41px; position: relative;
+  }
+  .said::before { content: '↳'; position: absolute; left: 27px; opacity: .5; }
+  .said.flag { color: var(--warn); }
+  .said.flag::before { content: '⚑'; opacity: .8; }
   .crew { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 18px 13px; }
   .crew .who {
     font-size: 11px; padding: 2px 9px; border-radius: 99px;
@@ -939,13 +948,20 @@
         // session's own fallback id, which tells the reader nothing.
         const w = crew.length > 1 ? st.owner || (st.status === 'done' ? st.doneBy : null) : null;
         const blocked = st.status === 'pending' ? waitsOn(st) : [];
+        // Calls the agent made that no question covered. They reach the review
+        // card too, but that is after the fact — seeing them arrive is the only
+        // chance to say "no, not like that" while it is still cheap.
+        const said = [
+          ...(st.decided || []).map((d) => `<div class="said">${esc(d.text)}</div>`),
+          ...(st.flags || []).map((f) => `<div class="said flag">${esc(f.text)}</div>`),
+        ].join('');
         return `<div class="step ${esc(st.status)}">
           <span class="mark">${MARK[st.status] || '·'}</span>
           <span>${esc(st.title)}${st.note ? ` <span class="note">— ${esc(st.note)}</span>` : ''}</span>
           ${w ? `<span class="who">${esc(w)}</span>` : ''}
           ${blocked.length ? `<span class="waits">waits on ${esc(blocked.join(', '))}</span>` : ''}
           ${(st.because || []).length ? `<span class="from">${esc(st.because.join(' '))}</span>` : ''}
-        </div>`;
+        </div>${said}`;
       }).join('')}</div>
       ${crew.length > 1 ? `<div class="crew">${crew.map((n) => {
         const on = steps.filter((x) => x.owner === n).map((x) => x.id);

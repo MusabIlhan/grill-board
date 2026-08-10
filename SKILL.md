@@ -252,9 +252,42 @@ anything itself. Its watch stays unfiltered, so it still sees the whole board.
 B=~/.claude/skills/grill-board/board.mjs
 node $B claim --state "$S" --as outbox        # exit 3 = wait, 0 with no step = done
 # ... do exactly that step, nothing outside it ...
+node $B build  --state "$S" --as outbox --step s1 \
+  --decided "Kept the 12-attempt cap — q3 said fix the class, and lowering it here would change the other two queues too"
 node $B change --state "$S" --as outbox --file /tmp/c.json
 node $B build  --state "$S" --as outbox --step s1 --status done --note "3 callers re-tested"
 ```
+
+### Say what you decided, or it is lost
+
+**Every call you make that the plan did not make for you goes back on the board
+with `--decided`.** This is not bookkeeping. The lead handed you a one-line step
+and got back a diff; without this, the only way for it to learn *why* the lemma
+match beat the surface match is to read your code and guess — which costs more
+than the step did, and is exactly what fanning out was supposed to save.
+
+```bash
+node $B build --state "$S" --as outbox --step s8 \
+  --decided "Matched on (lemma, pos), not surface form — two of the three callers already normalise and the third was the bug" \
+  --decided "Used a partial index; the table is 40M rows and this write path is hot" \
+  --flag "sentence_forms.position is written from here — if the slot rules ever diverge the indices are wrong"
+```
+
+- **Repeatable.** One `--decided` per call you made, not a paragraph.
+- **Say what you chose *over what*, and why.** "Used a partial index" is a
+  changelog entry. "Used a partial index rather than a full one, because the
+  table is 40M rows and this write path is hot" is a decision someone can
+  overturn.
+- **`--flag` is for what the next person needs to know** — a landmine you found,
+  something that turned out unlike the plan, something you deliberately left.
+- **Recording is not finishing.** With no `--status`, the step does not move —
+  so record a call the moment you make it, while the reason is still in front of
+  you, rather than reconstructing it an hour later.
+- Only the holder may record on a step, same as moving it.
+
+Settling a step with nothing recorded is allowed — "run the typecheck" decides
+nothing — but on a shared board it warns, and `decisions` marks it as a step
+somebody will have to read back.
 
 `claim` takes **one** step, atomically. Two agents cannot hold the same one —
 the pick and the mark happen inside the same lock as every other write. What
@@ -297,6 +330,39 @@ lead's. Workers use `--mine`; the lead never does.
 
 So a `change the code` verdict wakes exactly the agent that wrote that change,
 which is the one that still knows why.
+
+### What the lead reads
+
+A step landing wakes the lead, and **the wake carries the handback** — it does
+not point at it. There is no second command to run and no diff to open:
+
+```
+[step] s8 done by backfill — Lexeme identity (3 callers re-tested) · c7 c8
+    decided: Matched on (lemma, pos), not surface form — two of the three callers
+             already normalise and the third was the bug
+    FLAG: sentence_forms.position is written from here — if the slot rules ever
+          diverge the indices are wrong
+```
+
+For the standing picture — a lead that has just picked the board up, or is about
+to write the summary — one command gives every step, who did it, what it wrote,
+and what it settled:
+
+```bash
+node $B decisions --state "$S"            # everything
+node $B decisions --state "$S" --as backfill   # one agent
+node $B decisions --state "$S" --step s8       # one step
+```
+
+A settled step that recorded nothing says so, in those words. That is the point:
+the lead needs to know *which* steps it still has to read back, not to discover
+later that it never knew.
+
+The lead's own job on a handback is to read it, not to re-derive it. Act when a
+decision contradicts an answer on the board, when two workers decided
+incompatible things, or when a `FLAG` changes what a later step should do — and
+otherwise leave it alone. The decisions also ride onto the review cards, so the
+user judges them too; a call nobody asked about is exactly what review is for.
 
 ### Writing a change entry
 
@@ -487,4 +553,6 @@ thread ends when the next question would not change what gets built.
 | `review --state P` | turn every unreviewed change into a card, with its decisions attached |
 | `claim --state P --as W [--step s3] [--steal s3]` | take one step, exclusively. Exit 3 = wait, exit 0 with no step = the build is done |
 | `release --state P --as W [--step s3] [--failed] [--reason R]` | hand a step back |
+| `build --state P --step s8 --decided "..." [--decided "..."] [--flag "..."]` | record a call you made. Repeatable; with no `--status` the step does not move |
+| `decisions --state P [--step s8] [--as W]` | what every worker settled, and which settled steps recorded nothing |
 | `new`/`watch --as W [--mine]` | that agent's own event cursor; `--mine` narrows a worker to verdicts on what it wrote |

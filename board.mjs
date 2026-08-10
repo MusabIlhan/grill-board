@@ -135,12 +135,18 @@ function parseArgs(argv) {
     if (a.startsWith('--')) {
       const key = a.slice(2);
       const next = argv[i + 1];
-      if (next === undefined || next.startsWith('--')) out[key] = true;
-      else { out[key] = next; i++; }
+      const val = next === undefined || next.startsWith('--') ? true : (i++, next);
+      // Repeats accumulate instead of overwriting, so `--decided X --decided Y`
+      // records two decisions rather than losing the first. A flag given once
+      // is still a plain string, which is what every existing reader expects.
+      if (key in out) out[key] = [...asList(out[key]), val];
+      else out[key] = val;
     } else out._.push(a);
   }
   return out;
 }
+
+const asList = (v) => (v === undefined || v === true ? [] : Array.isArray(v) ? v : [v]);
 
 const args = parseArgs(process.argv.slice(2));
 const cmd = args._[0];
@@ -428,6 +434,18 @@ function reviewContext(s, c) {
     out.push('**Because you decided**', '');
     for (const qid of c.because) out.push(decisionLine(s, qid));
     out.push('');
+  }
+  // Calls the agent made that no answer covers. These are the ones most worth a
+  // second pair of eyes precisely because nobody was asked — a review that shows
+  // only what was decided ON THE BOARD hides everything decided off it.
+  const st = c.step && s.build ? s.build.steps.find((x) => x.id === c.step) : null;
+  if (st && (st.decided || []).length) {
+    out.push('**Also decided while building** — nobody asked about these', '');
+    for (const d of st.decided) out.push(`- ${d.text}`);
+    out.push('');
+  }
+  if (st && (st.flags || []).length) {
+    for (const f of st.flags) out.push(`⚑ ${f.text}`, '');
   }
   if (c.rev > 1) out.push(`*Revision ${c.rev} — rewritten after your last review.*`, '');
   if (c.diff) {
@@ -1145,6 +1163,18 @@ function describe(ev) {
     return `[ask:${ev.kind}] ${ev.id} (${ev.thread}) ${want}`;
   }
   if (ev.type === 'message') return `[message] ${JSON.stringify(String(ev.text).slice(0, 160))}`;
+  // A step landing is the lead's wake, and the line carries the handback rather
+  // than pointing at it — the lead should not have to run a second command, let
+  // alone open the diff, to find out what its worker settled on.
+  if (ev.type === 'step') {
+    const head = `[step] ${ev.id} ${ev.status}${ev.by ? ` by ${ev.by}` : ''} — ${ev.title}` +
+      `${ev.note ? ` (${ev.note})` : ''}${(ev.changes || []).length ? ` · ${ev.changes.join(' ')}` : ''}`;
+    const body = [
+      ...(ev.decided || []).map((d) => `    decided: ${d}`),
+      ...(ev.flags || []).map((f) => `    FLAG: ${f}`),
+    ];
+    return [head, ...body].join('\n');
+  }
   return `[${ev.type}] ${ev.id || ''}`;
 }
 
@@ -1225,6 +1255,13 @@ const STEP_STATUS = ['pending', 'running', 'done', 'failed'];
 function cmdBuild() {
   const p = statePath();
   if (args.step) {
+    const decided = asList(args.decided).map(String);
+    const flags = asList(args.flag).map(String);
+    // Recording a decision is not finishing the work. A worker settles on
+    // something an hour into a step and says so THEN — if that call also marked
+    // the step done, it would either be delayed until the end (when the reason
+    // has faded) or end the step early. So the status only moves when asked.
+    const moving = args.status !== undefined || (!decided.length && !flags.length);
     const status = String(args.status || 'done');
     if (!STEP_STATUS.includes(status)) die(`--status must be one of ${STEP_STATUS.join(', ')}`);
     const me = whoami();
@@ -1239,8 +1276,17 @@ function cmdBuild() {
         return { denied: `${st.id} is held by ${st.owner} — claim it, or pass --force` };
       }
       touchWorker(s, me);
-      st.status = status;
+      // What this agent settled that the plan did not settle for it, and what
+      // it wants someone else to know. This is the whole point of the handback:
+      // a lead that fans six steps out to six agents otherwise learns what they
+      // each decided only by reading their code back, which costs more than
+      // doing the step. Appended, never replaced — a decision made at minute
+      // ten and one made at minute fifty are both true.
+      if (decided.length) st.decided = [...(st.decided || []), ...decided.map((t) => ({ by: me, at: new Date().toISOString(), text: t }))];
+      if (flags.length) st.flags = [...(st.flags || []), ...flags.map((t) => ({ by: me, at: new Date().toISOString(), text: t }))];
       if (args.note !== undefined) st.note = String(args.note);
+      if (!moving) return { ...st, recorded: decided.length + flags.length, moved: false, minted: [] };
+      st.status = status;
       st.at = new Date().toISOString();
       // Finishing or failing hands the step back; the holder is kept for the
       // record, but `owner` is what "someone is on this right now" means.
@@ -1257,11 +1303,34 @@ function cmdBuild() {
       // `building` and is reported as the debt it is.
       const logged = s.changes.filter((c) => c.title).length;
       const minted = settled && logged ? mintReviews(s) : [];
-      return { ...st, minted, owed: settled && !logged };
+      // The lead is not watching this board — it is waiting on an event stream.
+      // Without this, a fanned-out build reaches it as silence: no wake when a
+      // step lands, so the only way to find out is to poll, and the only way to
+      // find out WHAT was decided is to read the diff. The handback rides along
+      // so `new` answers both questions in one go.
+      if (status === 'done' || status === 'failed') {
+        pushEvent(s, {
+          type: 'step', id: st.id, status, by: st.doneBy, title: st.title,
+          note: st.note || '', decided: (st.decided || []).map((d) => d.text),
+          flags: (st.flags || []).map((f) => f.text),
+          changes: s.changes.filter((c) => c.step === st.id).map((c) => c.id),
+        });
+      }
+      return { ...st, minted, moved: true, owed: settled && !logged };
     });
     if (!out) die(`no build step ${args.step}`);
     if (out.denied) die(out.denied);
+    if (!out.moved) {
+      process.stdout.write(`${out.id} — recorded ${out.recorded} (status unchanged: ${out.status})\n`);
+      warnStaleServer(p);
+      return;
+    }
     process.stdout.write(`${out.id} ${out.status}\n`);
+    // Only on a shared build. Alone, the agent that decided it is the agent
+    // reading this, and there is nobody to hand back to.
+    if ((status === 'done' || status === 'failed') && !(out.decided || []).length && Object.keys(load(p).workers || {}).length > 1) {
+      process.stderr.write(`  ${out.id} settled with no --decided: whoever picks this up next cannot tell what you chose\n`);
+    }
     if (out.minted.length) {
       process.stdout.write(`build finished — ${out.minted.length} change${out.minted.length === 1 ? '' : 's'} up for review: ${out.minted.join(' ')}\n`);
     }
@@ -1393,6 +1462,41 @@ function cmdRelease() {
   });
   if (!out.ok) die(out.why);
   process.stdout.write(`released ${out.ids.join(' ')}${args.failed ? ' (failed)' : ''}\n`);
+}
+
+// Everything the workers settled, in one screen. The event stream is the live
+// channel — this is the standing one, for a lead that has just picked the board
+// up, or is about to write the summary and needs the whole build at once.
+//
+// A step with nothing recorded says so rather than being omitted. Silence that
+// looks like "no decisions" is the failure this exists to prevent: the lead
+// needs to know which steps it still has to read back, and which it does not.
+function cmdDecisions() {
+  const p = statePath();
+  const s = load(p);
+  const steps = s.build ? s.build.steps : [];
+  if (!steps.length) return process.stdout.write('no build yet\n');
+  const only = args.step && args.step !== true ? String(args.step) : null;
+  const mine = args.as ? whoami() : null;
+  const out = [];
+  let bare = 0;
+  for (const st of steps) {
+    if (only && st.id !== only) continue;
+    const who = st.doneBy || st.owner;
+    if (mine && who !== mine) continue;
+    const decided = st.decided || [], flags = st.flags || [];
+    const changes = (s.changes || []).filter((c) => c.step === st.id);
+    // Nothing recorded and nothing done yet is not a gap — it has not happened.
+    const settled = st.status === 'done' || st.status === 'failed';
+    if (settled && !decided.length) bare++;
+    out.push(`${st.id}  ${st.title}  [${st.status}${who ? ` · ${who}` : ''}]${st.note ? ` — ${st.note}` : ''}`);
+    for (const c of changes) out.push(`    wrote    ${c.id} ${(c.files || []).join(' ') || c.title}`);
+    for (const d of decided) out.push(`    decided  ${d.text}`);
+    for (const f of flags) out.push(`    FLAG     ${f.text}`);
+    if (settled && !decided.length) out.push('    decided  — nothing recorded; you would have to read this one back');
+  }
+  process.stdout.write(out.join('\n') + '\n');
+  if (bare) process.stderr.write(`\n  ${bare} settled step(s) recorded no decisions.\n`);
 }
 
 function cmdChange() {
@@ -1536,6 +1640,10 @@ function cmdExport() {
       lines.push(`- [${mark}] **${st.id}** ${st.title}` +
         `${(st.because || []).length ? ` *(${st.because.join(', ')})*` : ''}` +
         `${who ? ` — ${who}` : ''}${st.note ? ` — ${st.note}` : ''}`);
+      // The record is the thing you keep, and six months on "why is it matched
+      // on lemma" is answered here or nowhere — the agent that knew is gone.
+      for (const d of st.decided || []) lines.push(`  - decided: ${d.text}`);
+      for (const f of st.flags || []) lines.push(`  - ⚑ ${f.text}`);
     }
     lines.push('');
   }
@@ -1628,13 +1736,14 @@ const verbs = {
   serve, add: cmdAdd, new: cmdNew, watch: cmdWatch, retire: cmdRetire,
   note: cmdNote, status: cmdStatus, export: cmdExport, mcp: cmdMcp, gateway: cmdGateway,
   build: cmdBuild, change: cmdChange, review: cmdReview,
-  claim: cmdClaim, release: cmdRelease,
+  claim: cmdClaim, release: cmdRelease, decisions: cmdDecisions,
 };
 
 if (!cmd || !verbs[cmd]) {
   process.stderr.write(
-    'usage: board.mjs <serve|add|new|watch|retire|note|status|export|mcp|gateway|build|change|review|claim|release> --state <path>\n' +
-    '       agents sharing one board pass --as <name> to claim, log and drain independently\n'
+    'usage: board.mjs <serve|add|new|watch|retire|note|status|export|mcp|gateway|build|change|review|claim|release|decisions> --state <path>\n' +
+    '       agents sharing one board pass --as <name> to claim, log and drain independently\n' +
+    '       `decisions` is the lead\'s read: what every worker settled, without opening a diff\n'
   );
   process.exit(1);
 }

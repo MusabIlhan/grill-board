@@ -164,6 +164,31 @@ Every change is signed, so *"why is it done that way"* has someone to ask. And
 each agent keeps its own event cursor — so a **change the code** verdict wakes
 exactly the agent that wrote that change, which is the one that still knows why.
 
+**Every call a worker makes goes back on the board.** Fanning out is fast and
+its real cost is that the lead gets a diff and no reasoning — the only way to
+learn why the lemma match beat the surface match is to read the code and guess,
+which costs more than the step did. So a worker records what it settled, as it
+settles it:
+
+```bash
+node board.mjs build --state "$S" --as backfill --step s8 \
+  --decided "Matched on (lemma, pos), not surface — two of three callers already normalise" \
+  --flag "position is written from here; if the slot rules diverge the indices are wrong"
+```
+
+That reaches the lead **on the wake itself**, not as something to go and fetch:
+
+```
+[step] s8 done by backfill — Lexeme identity · c7 c8
+    decided: Matched on (lemma, pos), not surface — two of three callers already normalise
+    FLAG: position is written from here; if the slot rules diverge the indices are wrong
+```
+
+`decisions` gives the standing picture, and names any settled step that recorded
+nothing — so the lead knows which ones it still has to read back rather than
+finding out later. The same lines appear under the step on the board and on the
+review card, because a call nobody was asked about is exactly what review is for.
+
 ## Answering out loud
 
 The board is also an MCP server, so another session — one with a voice mode, on
@@ -218,7 +243,8 @@ A zero-dependency Node server and a single HTML page.
 
 ```
 board.mjs      server + CLI (serve, add, new, watch, retire, note, status, export,
-                             build, change, review, claim, release, mcp, gateway)
+                             build, change, review, claim, release, decisions,
+                             mcp, gateway)
 board.html     the page
 SKILL.md       the instructions Claude follows
 test-build.sh  the build protocol, raced for real

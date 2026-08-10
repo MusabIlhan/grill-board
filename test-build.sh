@@ -116,6 +116,39 @@ node "$B" build --state "$S2" --step s1 --status done >"$ROOT/last.out" 2>&1
 is "last step sends changes up" "$(grep -c 'up for review' "$ROOT/last.out")" "1"
 is "and flips the phase"        "$(node "$B" status --state "$S2" | grep -c '\[review\]')" "1"
 
+echo '== the handback: what one agent decided, read by another'
+S4="$ROOT/handback2.json"
+echo '[{"title":"Lemma or surface?","options":[{"key":"a","label":"Lemma"}]}]' | node "$B" add --state "$S4" >/dev/null
+echo '[{"title":"Lexeme identity","because":["q1"]},{"title":"Typecheck","because":["q1"]}]' \
+  | node "$B" build --state "$S4" >/dev/null
+node "$B" claim --state "$S4" --as backfill --step s1 >/dev/null
+# Recording is not finishing: a call made mid-step must be sayable without
+# ending the step, or it gets reconstructed at the end when the reason has faded.
+node "$B" build --state "$S4" --as backfill --step s1 \
+  --decided "Matched on (lemma, pos), not surface" --decided "Partial index — the table is hot" \
+  --flag "position is written from here" >"$ROOT/rec.out" 2>&1
+is "records without moving"  "$(grep -c 'status unchanged: running' "$ROOT/rec.out")" "1"
+is "repeats accumulate"      "$(node "$B" decisions --state "$S4" 2>/dev/null | grep -c 'decided')" "2"
+is "a flag is its own thing" "$(node "$B" decisions --state "$S4" 2>/dev/null | grep -c 'FLAG')" "1"
+# Only the holder records, same as moving — a decision under the wrong name is
+# worse than no decision at all.
+node "$B" build --state "$S4" --as intruder --step s1 --decided "mine now" >/dev/null 2>&1
+is "non-holder cannot record" "$?" "1"
+
+node "$B" build --state "$S4" --as backfill --step s1 --status done >/dev/null 2>&1
+# The lead is not watching the board; it is waiting on events. The handback has
+# to ride the wake, or fanning out costs more to supervise than to do.
+node "$B" new --state "$S4" >"$ROOT/lead.json"
+is "the lead is woken by the step" "$(grep -c '"type": "step"' "$ROOT/lead.json")" "1"
+is "and the wake carries the why"  "$(grep -c 'Partial index' "$ROOT/lead.json")" "1"
+is "workers are not"               "$(node "$B" new --state "$S4" --as backfill --mine | grep -c '"type": "step"')" "0"
+
+node "$B" claim --state "$S4" --as tests --step s2 >/dev/null
+node "$B" build --state "$S4" --as tests --step s2 --status done >"$ROOT/bare.out" 2>&1
+is "a bare settle warns"    "$(grep -c 'no --decided' "$ROOT/bare.out")" "1"
+is "and is named as a gap"  "$(node "$B" decisions --state "$S4" 2>/dev/null | grep -c 'nothing recorded')" "1"
+is "one agent, one view"    "$(node "$B" decisions --state "$S4" --as backfill 2>/dev/null | grep -c '^s2')" "0"
+
 echo '== a build that logged nothing'
 S3="$ROOT/empty.json"
 echo '[{"title":"Fix it?","options":[{"key":"a","label":"Yes"}]}]' | node "$B" add --state "$S3" >/dev/null
