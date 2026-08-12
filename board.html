@@ -296,7 +296,15 @@
     margin: 0 0 12px;
     overflow: hidden;
   }
-  .card.child { margin-left: 22px; border-left: 3px solid var(--line-2); }
+  /* A follow-up is indented one step per level of nesting, and the steps stop
+     at three. Past that the indent flattening out IS the signal: the nest is
+     deeper than anyone holds in their head, and eating the whole column to say
+     so would only cost the text its width. --indent is the single knob, so the
+     narrow-screen block below rescales the whole ladder in one place. */
+  .card.child { margin-left: var(--indent, 22px); border-left: 3px solid var(--line-2); }
+  .card.d1 { --indent: 22px; }
+  .card.d2 { --indent: 44px; }
+  .card.d3 { --indent: 66px; }  /* depth 3 and deeper */
   .card.child::before { content: ""; }
   .card.is-new { border-color: var(--accent); }
   /* The keyboard cursor. Outline rather than border so it never reflows the
@@ -484,7 +492,6 @@
   /* A review card is not a question — it is code that already exists. The rail
      says so at a glance, so a diff is never mistaken for a proposal. */
   .card.review { border-left: 3px solid var(--accent); }
-  .card.review.child { margin-left: 22px; }
   .chip.built { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
   .prose pre.diff { line-height: 1.5; }
   .prose pre.diff .add { color: var(--good); }
@@ -575,7 +582,12 @@
     .meter { display: none; }
     #msg { font-size: 0; padding: 5px 11px; }
     #msg::after { content: "Tell Claude"; font-size: 12.5px; }
-    .card.child { margin-left: 10px; }
+    /* Same three-step ladder, scaled to the phone. Measured at 375px: the
+       depth-3 card is 321px and its text column 287px (against 307px at depth
+       1), so the deepest card is visibly narrower but never squeezed. */
+    .card.d1 { --indent: 10px; }
+    .card.d2 { --indent: 20px; }
+    .card.d3 { --indent: 30px; }
     .card-body { padding: 15px 15px 17px; }
     .q-title { font-size: 17px; }
     .hint { display: none; }
@@ -1326,11 +1338,15 @@
   }
 
   function card(q) {
-    const isChild = (q.depth || 0) > 0;
-    const cls = ['card', isChild ? 'child' : ''];
+    // `child` carries the rail, `d1`/`d2`/`d3` carry the indent — capped, so a
+    // depth-4 follow-up sits level with its depth-3 parent rather than marching
+    // off the page. Every card shape below emits the same pair.
+    const depth = Math.max(0, q.depth || 0);
+    const nest = depth ? `child d${Math.min(depth, 3)}` : '';
+    const cls = ['card', nest];
 
     if (q.status === 'retired') {
-      return `<div class="card retired ${isChild ? 'child' : ''}" data-qid="${q.id}"><div class="done-row">
+      return `<div class="card retired ${nest}" data-qid="${q.id}"><div class="done-row">
         <span class="tick">✕</span><div><div class="q">${esc(q.title)}</div>
         <div class="a"><em>Retired — ${esc(q.retiredReason || '')}</em></div></div></div></div>`;
     }
@@ -1346,7 +1362,7 @@
         ? `<div class="built-from">Built: ${made.map((c) =>
             `<b data-goto="${c.reviewId || ''}" title="${esc(c.title)}">${c.id}</b>`).join(' · ')}</div>`
         : '';
-      return `<div class="card done ${isChild ? 'child' : ''}" data-open="${q.id}" data-qid="${q.id}">
+      return `<div class="card done ${nest}" data-open="${q.id}" data-qid="${q.id}">
         <div class="done-row"><span class="tick">✓</span><div>
           <div class="q">${esc(q.title)}</div><div class="a">${ans}</div>${built}
         </div></div></div>`;

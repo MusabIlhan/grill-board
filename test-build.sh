@@ -159,5 +159,117 @@ node "$B" build --state "$S3" --step s1 --status done >"$ROOT/owed.out" 2>&1
 is "stays in building" "$(node "$B" status --state "$S3" | grep -c '\[building\]')" "1"
 is "and says what it owes" "$(grep -c 'NO change has been logged' "$ROOT/owed.out")" "1"
 
+# The card budget. A refusal is loud when it fires, so the checks that matter
+# are the quiet halves: that the REST of the batch still landed, and that a card
+# which merely looks short still gets counted where it actually spends — in the
+# option details, which are read last and are the natural place to hide overflow.
+echo '== the card budget'
+S5="$ROOT/budget.json"
+cat <<'JSON' | node "$B" add --state "$S5" >"$ROOT/bud.out" 2>"$ROOT/bud.err"
+[{"title":"Legal","context":"One.\n\nTwo.\n\n| a | b |\n|---|---|\n| 1 | 2 |","options":[{"label":"x"}]},
+ {"title":"Four paragraphs and two tables","context":"One.\n\nTwo.\n\n| a |\n|---|\n\nThree.\n\n| b |\n|---|\n\nFour.","options":[{"label":"y"}]},
+ {"title":"Also legal","context":"Prose.","options":[{"label":"z"}]}]
+JSON
+is "over-budget card refused"  "$(grep -c 'REFUSED' "$ROOT/bud.err")" "1"
+is "the rest of the batch lands" "$(grep -c '^added 2: q1 q2' "$ROOT/bud.out")" "1"
+is "names which limit broke"   "$(grep -c '4 paragraphs, max 3 · 2 figures, max 1' "$ROOT/bud.err")" "1"
+is "says split, not trim"      "$(grep -c 'more than one thing in it' "$ROOT/bud.err")" "1"
+# The answer to "how do I know before I hit it": every accepted card reports
+# where it landed, so calibration needs no second command and no discipline.
+is "accepted cards report size" "$(grep -cE '^  q[12] +[0-9]+p [0-9]+f' "$ROOT/bud.out")" "2"
+
+# A short body with fat option details is the loophole q12 closed. It must be
+# refused on characters even though it is one paragraph and no figure.
+node -e 'console.log(JSON.stringify([{title:"Short body, fat options",context:"One line.",
+  options:[{label:"a",detail:"x".repeat(1100)},{label:"b",detail:"y".repeat(1100)}]}]))' >"$ROOT/fat.json"
+node "$B" add --state "$S5" --file "$ROOT/fat.json" >/dev/null 2>"$ROOT/fat.err"
+is "options count toward the ceiling" "$(grep -c 'characters, max 2000' "$ROOT/fat.err")" "1"
+
+# One figure, not three paragraphs and two figures: a code block is one thing to
+# look at however many blank lines are inside it.
+cat <<'JSON' | node "$B" add --state "$S5" >"$ROOT/fence.out" 2>&1
+[{"title":"Fenced block with a gap inside","context":"Prose.\n\n```ts\nconst a = 1;\n\nconst b = 2;\n```\n\nMore.","options":[{"label":"z"}]}]
+JSON
+is "a fence with blanks is one figure" "$(grep -cE '^  q[0-9]+ +2p 1f' "$ROOT/fence.out")" "1"
+
+# The gate. Its whole point is that you are never left with nothing to answer,
+# so the check is as much about what stays OPEN as about what is held back.
+echo '== a card that waits on another'
+S6="$ROOT/gate.json"
+echo '[{"title":"Which store wins?","context":"a","options":[{"key":"a","label":"x"}]}]' \
+  | node "$B" add --state "$S6" >/dev/null
+cat <<'JSON' | node "$B" add --state "$S6" >/dev/null
+[{"title":"How do we migrate it?","parentId":"q1","needs":["q1"],"context":"meaningless until q1 lands","options":[{"key":"a","label":"y"}]},
+ {"title":"Unrelated, answerable now","context":"b","options":[{"key":"a","label":"z"}]},
+ {"title":"Waits on a typo","needs":["q99"],"context":"c","options":[{"key":"a","label":"w"}]}]
+JSON
+state() { node -e "const s=require('$S6');console.log((s.questions.find(q=>q.id==='$1')||{}).status)"; }
+is "gated card is held"        "$(state q2)" "queued"
+is "unrelated card stays open" "$(state q3)" "open"
+# A typo must degrade to an ungated card, never to one that is invisible for
+# ever — there is no way to find or unstick a card that never renders.
+is "an unknown id does not gate" "$(state q4)" "open"
+
+node "$B" serve --state "$S6" --port "$((PORT+1))" >"$ROOT/gate-serve.log" 2>&1 &
+GSRV=$!
+sleep 1.2
+curl -s -X POST "http://localhost:$((PORT+1))/api/answer" -H 'content-type: application/json' \
+  -d '{"id":"q1","keys":["a"]}' >/dev/null
+is "answering the dep releases it" "$(state q2)" "open"
+kill "$GSRV" 2>/dev/null; wait "$GSRV" 2>/dev/null
+
+# A review card is a card. The diff is exempt because it is the artifact under
+# review, so the prose is where the rule has to bite — and a summary too long is
+# not "write less", it is a change that is really several changes.
+echo '== the budget on a review card'
+S7="$ROOT/rev.json"
+echo '[{"title":"Fix it?","options":[{"key":"a","label":"Yes"}]}]' | node "$B" add --state "$S7" >/dev/null
+echo '[{"title":"Do it","because":["q1"]}]' | node "$B" build --state "$S7" >/dev/null
+node -e 'console.log(JSON.stringify([
+  {title:"Normal",because:["q1"],summary:"One.\n\nTwo.",risk:"A guess.",diff:"--- a/x\n+++ b/x\n+ one"},
+  {title:"Summary describing four things",because:["q1"],summary:"One.\n\nTwo.\n\nThree.\n\nFour.",diff:"+ small"},
+  {title:"Honest but large",because:["q1"],summary:"One thing.",diff:"--- a/y\n+++ b/y\n"+Array.from({length:150},(_,i)=>"+ l"+i).join("\n")}
+]))' >"$ROOT/ch.json"
+node "$B" change --state "$S7" --file "$ROOT/ch.json" >"$ROOT/ch.out" 2>"$ROOT/ch.err"
+is "over-budget change refused"  "$(grep -c 'REFUSED' "$ROOT/ch.err")" "1"
+is "the others still log"        "$(grep -c 'logged c1 c2' "$ROOT/ch.out")" "1"
+is "and it says log it as more"  "$(grep -c 'MORE' "$ROOT/ch.err")" "1"
+# A limit here would refuse the honest single-function rewrite, so a big diff
+# must warn and land. If this ever starts refusing, that is the regression.
+is "a big diff warns"            "$(grep -c '150-line diff' "$ROOT/ch.err")" "1"
+is "and lands anyway"            "$(node "$B" status --state "$S7" | grep -c 'Honest but large')" "1"
+
+# The example is the real spec. An agent copies the shape of the worked card in
+# SKILL.md far more reliably than it follows the rule written above it — so an
+# example that drifts over budget teaches the wrong card to everyone who reads
+# it, and nothing else would notice, because prose does not fail a build. This
+# runs the SHIPPED counter over the JSON blocks in SKILL.md.
+echo '== SKILL.md practises what it documents'
+cat > "$ROOT/skillcheck.mjs" <<'EOF'
+import { readFileSync } from 'node:fs';
+const B = await import(process.argv[2]);
+const md = readFileSync(process.argv[3], 'utf8');
+const bad = [];
+let n = 0;
+for (const m of md.matchAll(/```json\n([\s\S]*?)```/g)) {
+  let o; try { o = JSON.parse(m[1]); } catch { continue; }
+  for (const c of (Array.isArray(o) ? o : [o])) {
+    if (!c || !c.title) continue;
+    const isChange = 'summary' in c || 'diff' in c;
+    const over = B.overBudget(isChange ? B.measureChange(c) : B.measureCard(c));
+    n++;
+    if (over.length) bad.push(`"${c.title.slice(0, 40)}" ${over.join(' · ')}`);
+  }
+}
+console.log(!n ? 'NO EXAMPLES FOUND' : bad.length ? bad.join('; ') : `${n} legal`);
+EOF
+HERE="$(cd "$(dirname "$0")" && pwd)"
+is "every worked example is legal" \
+  "$(node "$ROOT/skillcheck.mjs" "$B" "$HERE/SKILL.md" | grep -c 'legal')" "1"
+# Guard the guard: if the extractor stops finding examples it reports success
+# forever, which is the one failure a green tick cannot show you.
+is "and there are examples to check" \
+  "$(node "$ROOT/skillcheck.mjs" "$B" "$HERE/SKILL.md" | grep -c 'NO EXAMPLES')" "0"
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]

@@ -1,6 +1,6 @@
 ---
 name: grill-board
-description: Reach agreement on a plan, design, spec — or on how a change is actually going to be written — through a live web board instead of one blocking question at a time, then build what was agreed and hand every diff back for review against the answer that caused it. Posts roomy, self-contained questions answered in any order; each answer wakes the session to branch follow-ups while the rest stay answerable. For a bug or a change it diagnoses first and grills on the implementation forks, so the user is in the code decision rather than describing the problem; when the questions run out it shows the build happening on the same board and reviews each change against its decisions. Use when the user says "grill-board", "grill me in parallel", "batch grill me", or prefixes a task with it ("grill-board fix the retry loop"), or wants a plan stress-tested without being blocked one question at a time.
+description: Reach agreement on a plan, design, spec — or on how a change is actually going to be written — through a live web board instead of one blocking question at a time, then build what was agreed and hand every diff back for review against the answer that caused it. Posts self-contained one-decision questions, answered in any order; each answer wakes the session to branch follow-ups while the rest stay answerable. For a bug or a change it diagnoses first and grills on the implementation forks, so the user is in the code decision rather than describing the problem; when the questions run out it shows the build happening on the same board and reviews each change against its decisions. Use when the user says "grill-board", "grill me in parallel", "batch grill me", or prefixes a task with it ("grill-board fix the retry loop"), or wants a plan stress-tested without being blocked one question at a time.
 ---
 
 # grill-board
@@ -12,9 +12,11 @@ because the synchronous version stalls:
 
 - **You never block.** Questions go on a board. The user answers whichever one
   they like, in whatever order, whenever. You are woken by their answers.
-- **Questions are roomy.** The board renders full markdown per question — code
-  blocks, tables, tradeoffs. Put *everything needed to answer* inside the
-  question. There is no "as we discussed above"; each card must stand alone.
+- **Questions are self-contained, and each one is one thing.** The board renders
+  full markdown per question — a code block, a table, real numbers. Put
+  *everything needed to answer* inside the card, and nothing beyond it: there is
+  no "as we discussed above", and nothing that does not change which option they
+  pick. More to understand is more cards, never a denser one.
 
 ## The loop
 
@@ -382,8 +384,26 @@ user judges them too; a call nobody asked about is exactly what review is for.
   someone to approve a diff and remember unaided what they asked for. It is a
   list because one change often settles two answers; the same question showing
   up under three changes is normal and correct.
-- **One change per thing they could sensibly say no to.** Not one per file, not
-  one per commit. If half of it could be accepted and half rejected, it is two.
+- **One change per thing they must understand to say yes.** Not one per file,
+  not one per commit — and "could they say no to it" is the weaker test, because
+  someone can say no to a thing they never understood, and that no costs you the
+  rebuild. A change splits where the *understanding* splits.
+- **A review card is on the same budget**, and for the same reason: three
+  paragraphs and one figure **in `summary`**, and 2000 characters across
+  `title`, `summary` and `risk` together. `risk` costs characters but is not one
+  of the three paragraphs — it sits where a question card's `recommendation`
+  sits, a single trailing statement rather than part of the argument. Counting
+  it as a paragraph quietly leaves the summary two, which is a different rule
+  from the one on a question card. The `diff` does not count either — it is the
+  artifact under review rather than an account of it — and neither do the quoted
+  decisions, which come from cards that already passed the budget. What keeps a giant change honest is the
+  split rule, not the counter: `change` warns on stderr when a diff is big
+  enough to be more than one thing, and that is a nudge, not a limit, because
+  the honest 90-line single-hunk rewrite still has to be postable.
+- **Past two parts, add a parent card.** Three or more related changes get one
+  card above them that says how they fit and decides nothing — `because`, a
+  summary, no diff. Without it they approve three pieces one at a time and never
+  meet the whole those pieces add up to.
 - **`title` says what changed, not what you did.** "classifyError now splits
   retryable from terminal", never "Updated classifyError".
 - **`summary` is prose, and it is what a voice client reads out** in place of
@@ -441,17 +461,31 @@ cause, and that the choices are three implementations, not three theories:
   "thread": "Outbox",
   "title": "A 4xx retries forever. Fix it at the classifier or at the queue?",
   "spoken": "I found it — the retry loop treats every failure as temporary, so a permanent 4xx never stops. There are two places to fix that. Do you want the queue to decide when to give up, or the thing that reads the response to say up front whether it is worth retrying?",
-  "context": "```ts\n// backend/src/sync/outbox.ts:112\ncatch (e) { await sleep(backoff); return retry(job); }   // no terminal case\n```\n\nA 401 and a CHECK violation both land here, and neither can ever succeed.\n\n| | at the classifier | at the queue |\n|---|---|---|\n| touches | `classifyError` — 3 callers | `outbox.ts` only |\n| fixes the class | yes, everywhere | this queue only |\n| re-test | all 3 callers | the outbox |",
+  "context": "```ts\n// backend/src/sync/outbox.ts:112\ncatch (e) { await sleep(backoff); return retry(job); }   // no terminal case\n```\n\nA 401 and a CHECK violation both land there, and neither can ever succeed: the job sleeps, retries, and arrives back at the same `catch` until someone notices. Nothing on this path can tell a failure that might work next time from one that never will.\n\n`classifyError` is where that distinction would live, and its other two callers have the same latent bug. Fixing it there re-tests all three; capping attempts in `outbox.ts` touches nothing outside this queue and leaves the other two as they are.",
   "recommendation": "Classifier. The other two callers have the same latent bug, and a retryable/terminal split is the thing that was actually missing.",
   "options": [
-    { "label": "Split retryable vs terminal in classifyError", "detail": "Fixes the class. Re-tests 3 callers.", "recommended": true },
-    { "label": "Give the outbox a max-attempts cap", "detail": "Smallest diff, contained. The other callers stay broken and 401 still burns the cap." },
+    { "label": "Split retryable vs terminal in classifyError", "detail": "Fixes the class everywhere. Re-tests all 3 callers.", "recommended": true },
+    { "label": "Give the outbox a max-attempts cap", "detail": "Smallest diff, contained to this queue. The other two callers stay broken and a 401 still burns the whole cap." },
     { "label": "Cap now, classifier next week", "detail": "Unblocks today. The follow-up is the one that never happens." }
   ]
 }
 ```
 
+That card is 2 paragraphs, 1 figure and 1143 characters — inside the budget
+below with room to spare, and it got there by losing a table. An earlier draft
+carried the code *and* a three-row comparison of the two fixes; the table said
+what the option details already said, so it went. The code stayed, because
+without it they cannot tell a cause you found from a theory you have.
+
 ## Writing a good card
+
+**One card leaves them holding the whole of one thing.** Everything in this
+section serves that, and it reverses what this file used to say — that `context`
+carried the weight, and that long was fine so long as it was not vague. Long is
+not fine. A card long enough to skim gets skimmed, and a decision taken off a
+skimmed card is a decision taken off whichever phrases happened to be bold.
+**More to understand is more cards, never a denser card.** Cut the material at
+its joints; never compress it.
 
 ```json
 {
@@ -459,19 +493,20 @@ cause, and that the choices are three implementations, not three theories:
   "parentId": "q4",
   "title": "What wins when two devices edit the same piece offline?",
   "spoken": "Two devices edit the same piece offline, then both sync. One of those edits has to lose. Should the later timestamp just win, or should the two be merged field by field?",
-  "context": "Both clients stamp `updatedAt` locally...\n\n```ts\n// pieceProgressStore.ts:88\n```\n\n| | last-write-wins | per-field merge |\n|---|---|---|\n| cost | ~20 lines | ~200 |",
-  "recommendation": "Last-write-wins. Two-device conflicts need the same piece within one sync window — rare enough that the merge cost isn't repaid.",
+  "context": "Both clients stamp `updatedAt` from their own clock and `pieceProgressStore.ts:88` keeps the higher one, so today the device with the fast clock wins an edit it may have made first. Either way the losing edit is gone with nothing recorded to say it existed.\n\n| | last-write-wins | per-field merge |\n|---|---|---|\n| cost | ~20 lines | ~200, plus a clock per field |\n| loses | the whole earlier edit | nothing |\n| needs | nothing new | a migration on `piece_progress` |\n\nReaching this at all takes two devices editing one piece inside a single sync window — twice in six weeks of my own use, both times my own phone and laptop.",
+  "recommendation": "Last-write-wins. The merge is ten times the code plus a migration, and it buys correctness in a case that has come up twice; revisit it the day two people can share a piece.",
   "options": [
-    { "label": "Last-write-wins on updatedAt", "detail": "Simplest. A loses silently.", "recommended": true },
-    { "label": "Merge per field", "detail": "No data loss; needs per-field clocks." },
-    { "label": "Ask the user on conflict", "detail": "Never wrong, always annoying." }
+    { "label": "Last-write-wins on updatedAt", "detail": "~20 lines, no migration. The earlier edit is dropped silently.", "recommended": true },
+    { "label": "Merge per field", "detail": "No edit is ever lost. Needs a per-field clock and a migration on piece_progress." },
+    { "label": "Ask the user on conflict", "detail": "Never silently wrong, and a prompt in the middle of a sync they did not start." }
   ],
   "multi": false,
   "queued": false
 }
 ```
 
-Rules that make or break this:
+That card is 2 paragraphs, 1 figure and 1140 characters — the shape to aim for,
+not the ceiling to crowd. Rules that make or break it:
 
 - **`title` is one line.** The decision, phrased as a question. Not a paragraph.
 - **`spoken` is that question for the ear.** A voice client reads it aloud, and
@@ -480,9 +515,14 @@ Rules that make or break this:
   someone answer it having heard only this? If not, the card is doing too much
   and wants splitting. Write one for every card; without it a narrator has to
   improvise from `context`, which is where the detail quietly goes missing.
-- **`context` carries the weight.** Real file paths and line numbers, the actual
-  code, the actual numbers, the tradeoff table. This is the whole reason the
-  board exists — use the space. Long is fine; vague is not.
+- **`context` is that one thing, whole.** Real file paths and line numbers, the
+  actual code, the actual numbers, the tradeoff table — but only what bears on
+  *this* decision. Anything true of the area that does not change which option
+  they pick is a different card, or no card. The test is not "was that short",
+  it is "could they now explain it back".
+- **One figure, and make it the one the decision turns on.** The code that shows
+  you found the cause, or the table that puts the options side by side. Rarely
+  both — a card that wants both is usually two cards.
 - **Options are concrete and mutually exclusive**, 2–4 of them, each with a
   `detail` naming its real cost. Exactly one gets `recommended: true` — you
   always have a view, as in `/grill-me`.
@@ -492,13 +532,67 @@ Rules that make or break this:
 - `queued: true` parks a card until the board drains — use it for depth you
   know you will want but that would crowd the board now.
 
+### How much one card may hold
+
+**Three paragraphs and one figure**, where a figure is a markdown table or a
+fenced code block. `add` also refuses at **2000 characters across the whole
+card** — `title`, `context`, `recommendation`, and every option's `label` and
+`detail`. `spoken` is exempt; it is heard, not read.
+
+Write to the paragraphs and the figure, because those are what you can count
+while you type. The character ceiling is a backstop and should almost never
+fire: on the board that produced this rule the *largest* card ran 3 paragraphs,
+1 figure and 1661 characters, and all fifteen were legal. A card that trips 2000
+has a paragraph that ran away inside it. `add` prints where each accepted card
+landed — `q16  3p 1f 1740c` — so you stay calibrated by the last thing you
+posted rather than by remembering to check.
+
+**Over budget means split it, not shorten it.** Before you delete a word, apply
+this: *if you cut it and they could still pick an option but would no longer
+know what they were picking, that was not padding — it was half of a second
+card.* What may go is restatement, hedging, and anything the code could have
+answered for you. What may not is the figure, the recommendation, or any
+option's cost line. A card that fits because its options stopped saying what
+they cost is worse than the card that got refused.
+
+**Nothing caps how many cards one decision becomes.** Ten parts is ten cards,
+met one at a time, and that beats one card carrying ten. Keep them in one
+`thread` and hang them off the parent with `parentId`, so the board keeps the
+shape of the decision instead of a flat list of its pieces.
+
+**A card may declare `needs: ["q4"]`.** It waits in the queue until every id it
+names is answered, then promotes itself onto the board. Use it only where the
+later question genuinely has no meaning until the earlier one is settled — how
+the merge breaks ties is not a question at all if they pick last-write-wins.
+Everything else goes up at once: a dependency you get wrong hides a question
+they could have answered, and costs a round trip to notice.
+
+**A refusal still lands the rest of the batch.** The good cards go up, each
+rejected one is named with what it went over by — `q17 rejected — 5 paragraphs,
+max 3` — and the command exits non-zero so it cannot be a line you scroll past.
+Rewriting the refused card usually means revising the ones that went up beside
+it, because splitting a decision leaves its siblings overlapping. Do that; it is
+expected, not a mess you made.
+
+**Revising a card that is already up is retire + re-add.** There is no edit verb
+and there will not be one — nothing to get wrong, and a card can never change
+under someone in the middle of reading it. Pass `parentId` on the re-add so the
+replacement lands where the old card was. The cost is real: tombstones
+accumulate, so give `retire` a reason that says the card was split.
+
+The page hides nothing either. The card on screen is the whole card — no "more"
+to expand, nothing folded away — so the entire fix is in what gets written,
+which is why `add` refuses rather than the board quietly absorbing it.
+
 ## The queue
 
 The board shows at most 8 open cards (`--max-open`). Anything beyond that waits
 in `queued` and is promoted automatically as answers land. So: write follow-ups
-freely — you cannot flood them. What you must not do is let a *thread* run
-deeper than ~4, or ask a follow-up that merely restates a settled decision. A
-thread ends when the next question would not change what gets built.
+freely — you cannot flood them. A card gated by `needs` waits in that same
+queue and is promoted by the same pass, so the count in the header is the whole
+of what is waiting, whichever reason it waits for. What you must not do is let a
+*thread* run deeper than ~4, or ask a follow-up that merely restates a settled
+decision. A thread ends when the next question would not change what gets built.
 
 ## Rules
 
@@ -540,16 +634,16 @@ thread ends when the next question would not change what gets built.
 | `serve --state P [--port N] [--host H] [--title T] [--subtitle S] [--max-open N] [--token]` | start the board, print URLs (the subtitle is the title's tooltip — keep the title itself short and load-bearing) |
 | `mcp --state P` | MCP over stdio, so another session can read and answer this board. Also served at `POST /mcp` for a client that must reach it over a network |
 | `gateway [--port N] [--token]` | long-lived front door serving whichever board is current, for a tunnel + connector registered once. `serve` claims it and registers itself automatically — nothing to do per board. With several grills running, the voice client can `list_boards` and `use_board` to switch |
-| `add --state P --file F` | append questions (JSON array; `-` for stdin) |
+| `add --state P --file F` | append questions (JSON array; `-` for stdin). Prints each accepted card's shape — `q16  3p 1f 1740c`. Refuses any card over 3 paragraphs, 1 figure or 2000 whole-card characters, naming it and its overage; the rest of the batch still lands and the exit is non-zero. A card with `needs: ["q4"]` is accepted but held in the queue until those are answered |
 | `new --state P` | unprocessed events as JSON, advances the cursor |
 | `watch --state P` | one stdout line per event — for `Monitor` |
-| `retire --state P --id q3,q4 --reason R` | kill cards a later answer made moot |
+| `retire --state P --id q3,q4 --reason R` | kill cards a later answer made moot, or the card you are splitting — there is no edit verb, so re-add the replacements with `parentId` to land them back in place |
 | `note --state P --text T` | set the liveness line shown in the header |
 | `status --state P` | counts, phase, build progress, every change and its verdict |
 | `export --state P [--out F]` | the record: decisions, what each one produced, the build, every change with its diff and verdict |
 | `build --state P --file F` | declare the build; the board flips to `building` and shows the steps. Steps take `needs` and `files` |
 | `build --state P --step s2 --status running\|done\|failed [--note N] [--as W]` | move one step. Only its holder may, unless `--force` |
-| `change --state P --file F [--as W]` | log built changes (JSON array). Re-logging with an existing `id` rewrites it and reopens its review |
+| `change --state P --file F [--as W]` | log built changes (JSON array). Same budget as a question, counted over `title`, `summary` and `risk` only; a big diff warns on stderr rather than refusing. Re-logging with an existing `id` rewrites it and reopens its review |
 | `review --state P` | turn every unreviewed change into a card, with its decisions attached |
 | `claim --state P --as W [--step s3] [--steal s3]` | take one step, exclusively. Exit 3 = wait, exit 0 with no step = the build is done |
 | `release --state P --as W [--step s3] [--failed] [--reason R]` | hand a step back |

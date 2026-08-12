@@ -25,8 +25,9 @@ Then it builds what you decided, on the same board.
 Three things make it different from a chat prompt:
 
 - **You are never blocked.** Questions queue on a board, not in the conversation.
-- **Questions are roomy.** Each card renders full markdown — code, tables,
-  tradeoffs — so everything needed to answer is *in* the question.
+- **One card is one thing.** Each renders full markdown — code, a table, the
+  real tradeoff — but is capped at roughly three paragraphs and one figure, so
+  the decision is something you can hold rather than skim.
 - **It doesn't end at agreement.** The board drains, the build appears on it
   step by step, and every change comes back as a card carrying the answers that
   produced it.
@@ -94,6 +95,37 @@ Eight palettes ship (Gruvbox, Catppuccin, Nord, Solarized, Rosé Pine, Everfores
 Tokyo Night, GitHub), light and dark. All 16 combinations were contrast-audited:
 every text pair clears WCAG AA, every glyph clears 3:1. Default is Nord dark; the
 choice persists across boards.
+
+## Why the cards are short
+
+A long card gets skimmed. You read the bold, form an idea, and decide — and the
+decision is real even though the reading wasn't. So a card is capped: **three
+paragraphs, one figure, 2000 characters** counting the whole thing, title and
+options included. `add` refuses anything over, names which limit broke, and
+lands the rest of the batch anyway.
+
+The cap is **not** a brevity rule, and that distinction is the whole design. The
+goal is that one card leaves you holding the whole of one thing — so when there
+is more to understand, the answer is *more cards*, never denser ones. There is
+no limit on how many: a decision with six parts is six cards. What is forbidden
+is getting under the limit by deleting the tradeoff table, which is the cheap
+way under and removes the thing that made the card decidable.
+
+```
+q4  What is the budget counted in?
+ └─ q8   Where should the ceiling sit?
+     └─ q15  Two of your answers collide — 1400 was measured on bodies
+```
+
+Follow-ups sit under the question that caused them, indented one step per level.
+A card can also declare `needs: ["q4"]` and stay off the board until q4 is
+answered — used only where a question genuinely has no meaning until another one
+lands, since anything else just hides a question you were ready for.
+
+Review cards obey the same budget, on their prose. The diff doesn't count — it
+is the artifact under review, not an explanation of it — so a summary that needs
+more than three paragraphs isn't asking to be written more tersely. It is
+describing more than one change, and it gets logged as more than one.
 
 ## Building, and reviewing what got built
 
@@ -247,7 +279,7 @@ board.mjs      server + CLI (serve, add, new, watch, retire, note, status, expor
                              mcp, gateway)
 board.html     the page
 SKILL.md       the instructions Claude follows
-test-build.sh  the build protocol, raced for real
+test-build.sh  the build protocol raced for real, plus the card budget and the gate
 ```
 
 State is one JSON file per board. The CLI writes questions into it, the page

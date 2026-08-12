@@ -20,7 +20,7 @@
 //   node board.mjs review --state <path>                             # hand each change back
 
 import { createServer } from 'node:http';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, statSync, renameSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync, statSync, renameSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { networkInterfaces, homedir } from 'node:os';
@@ -37,6 +37,112 @@ const DEFAULT_MAX_OPEN = 8;
 // hypothetical — it is how a whole build went unseen. Bump this whenever
 // /api/state gains a field the page depends on.
 const API = 3;
+
+// ------------------------------------------------------------- card budget
+//
+// A card is capped so that answering it does not require skimming it. The cap
+// is NOT a brevity rule, and reading it as one produces exactly the wrong card:
+// the goal is that one card leaves you holding the whole of ONE thing, so when
+// there is more to understand the answer is MORE CARDS, never denser ones.
+// Nothing here licenses cutting the table that made a decision decidable —
+// that is the cheap way under the limit, and it is the failure this guards
+// against. SKILL.md carries the test for what may be cut and what must split.
+//
+// Two units, deliberately. Paragraphs and figures are what an author can count
+// while writing, which is what keeps a refusal rare rather than routine: a
+// limit you can only check by running something is a limit you will break.
+// Characters catch what a paragraph count cannot — squeeze an author on the
+// number of paragraphs and longer paragraphs are the obvious way out.
+const MAX_PARAS = 3;
+const MAX_FIGURES = 1;
+// Whole card, not just the body: title, context, recommendation, and every
+// option's label and detail. A field name is not a reason for something to be
+// free — with only the body measured, the natural move when refused is to push
+// the explanation down into the option details, which is the worst place for
+// it (read last, one at a time, never side by side). `spoken` is excluded
+// because it is heard rather than read. Measured across a real 15-card board a
+// full-shape card ran ~1660 whole, so this leaves headroom and the shape rule
+// stays the one an author writes to rather than this number.
+const MAX_CHARS = 2000;
+
+// Blocks, not lines: a fenced code block with blank lines inside it is one
+// figure, not three paragraphs with two figures around them.
+function splitBlocks(md) {
+  const out = [];
+  let cur = [];
+  let fence = null;
+  const flush = () => { const t = cur.join('\n').trim(); if (t) out.push(t); cur = []; };
+  for (const line of String(md).split('\n')) {
+    const f = line.trim().match(/^(```+|~~~+)/);
+    if (fence) {
+      cur.push(line);
+      if (f && f[1][0] === fence[0] && f[1].length >= fence.length) { fence = null; flush(); }
+      continue;
+    }
+    if (f) { flush(); fence = f[1]; cur.push(line); continue; }
+    if (!line.trim()) { flush(); continue; }
+    cur.push(line);
+  }
+  flush();
+  return out;
+}
+
+// A figure is a markdown table or a fenced code block — the two shapes that
+// carry a tradeoff without prose, and the two an author reaches for when the
+// card is genuinely about a comparison.
+const isFigure = (b) => /^(```|~~~)/.test(b) || /^\|/.test(b);
+
+function measureCard(raw) {
+  const body = String(raw.context || '');
+  const blocks = splitBlocks(body);
+  const figures = blocks.filter(isFigure).length;
+  return {
+    paras: blocks.length - figures,
+    figures,
+    chars:
+      String(raw.title || '').length +
+      body.length +
+      String(raw.recommendation || '').length +
+      (raw.options || []).reduce(
+        (n, o) => n + String(o.label || '').length + String(o.detail || '').length, 0),
+  };
+}
+
+// The same budget, on the part of a review card you actually read. The diff is
+// NOT counted: it is the artifact under review rather than an explanation of
+// it, and a 60-line hunk would refuse every honest change. Nor are the
+// decisions quoted onto the card — those come from cards that already passed,
+// and refusing a change for someone else's words would be nonsense.
+//
+// So the teeth for a large change are not a character count. They are the split
+// rule: one card per thing you must understand to say yes. A change whose
+// summary needs five paragraphs is five changes, and that is what this catches.
+// `risk` sits in the recommendation slot on purpose. On a question card the
+// recommendation counts toward characters but is not one of the three
+// paragraphs, because it is a single trailing statement rather than part of the
+// argument — and `risk` is the same shape. Folding it into the body instead
+// silently made the real summary budget two paragraphs, not three.
+function measureChange(raw) {
+  return measureCard({ title: raw.title, context: raw.summary, recommendation: raw.risk });
+}
+
+// Not a limit — a nudge, and the number is a judgement rather than a finding.
+// Set where a diff stops being something you hold in your head and starts being
+// several things wearing one title. An honest single-function rewrite has to
+// stay postable, so this never refuses; it only says so on stderr, to the author.
+const BIG_DIFF_LINES = 120;
+
+const diffLines = (d) =>
+  String(d || '').split('\n').filter((l) => /^[+-]/.test(l) && !/^(\+\+\+|---)/.test(l)).length;
+
+// Said in the terms the author can act on — which number, and what it may be.
+function overBudget(m) {
+  const over = [];
+  if (m.paras > MAX_PARAS) over.push(`${m.paras} paragraphs, max ${MAX_PARAS}`);
+  if (m.figures > MAX_FIGURES) over.push(`${m.figures} figures, max ${MAX_FIGURES}`);
+  if (m.chars > MAX_CHARS) over.push(`${m.chars} characters, max ${MAX_CHARS}`);
+  return over;
+}
 
 // Which board is live right now. Every `serve` claims it, so a long-running
 // gateway — and the connector URL registered against it — follows whatever
@@ -276,8 +382,30 @@ function promote(s) {
   let open = s.questions.filter((q) => q.status === 'open').length;
   for (const q of s.questions) {
     if (open >= max) break;
-    if (q.status === 'queued') { q.status = 'open'; q.openedAt = new Date().toISOString(); open++; }
+    if (q.status !== 'queued' || blocked(s, q)) continue;
+    q.status = 'open';
+    q.openedAt = new Date().toISOString();
+    open++;
   }
+}
+
+// A card may declare `needs: ["q4"]` — it stays off the board until q4 is
+// answered. Opt-in per card, and used only where the second question genuinely
+// has no meaning until the first is settled: gating a card that could have been
+// answered just hides a question the user was ready for, which is the blocking
+// this whole board exists to remove. It reuses `queued` rather than adding a
+// third status, so the header's "N queued" already counts it.
+//
+// Two deliberate non-blockers. An id that matches nothing does NOT gate — a
+// typo has to degrade to an ungated card rather than one that is invisible for
+// ever, and invisible-for-ever is unfindable from the page. Nor does a RETIRED
+// dependency: it is settled, just not by an answer, and waiting on it would
+// strand every follow-up of a card the agent re-asked.
+function blocked(s, q) {
+  return (q.needs || []).some((id) => {
+    const dep = s.questions.find((x) => x.id === id);
+    return dep && (dep.status === 'open' || dep.status === 'queued');
+  });
 }
 
 function pushEvent(s, ev) {
@@ -318,13 +446,21 @@ function addQuestions(s, list) {
         recommended: !!o.recommended,
       })),
       multi: !!raw.multi,
-      status: raw.queued ? 'queued' : 'open',
+      // Ids this card waits on. Ordering inside a nest is already depth-first,
+      // so this is only for the case ordering cannot cover: a question whose
+      // premise is still open, which the user would have to read and skip.
+      needs: (raw.needs || []).map(String),
+      status: 'open',
       askedAt: new Date().toISOString(),
-      openedAt: raw.queued ? null : new Date().toISOString(),
+      openedAt: null,
       answer: null,
       retiredReason: null,
     };
     if (!q.title) continue;
+    // Parked deliberately (`queued`), or waiting on something still open. Both
+    // land in the same state; `promote` releases whichever becomes eligible.
+    q.status = raw.queued || blocked(s, q) ? 'queued' : 'open';
+    q.openedAt = q.status === 'open' ? new Date().toISOString() : null;
     s.questions.push(q);
     added.push(q.id);
   }
@@ -1098,11 +1234,52 @@ function cmdAdd() {
   let list;
   try { list = JSON.parse(src); } catch (e) { die(`questions JSON is invalid: ${e.message}`); }
   if (!Array.isArray(list)) list = [list];
-  const added = mutate(p, (s) => addQuestions(s, list));
+
+  // Measured before anything is written. An over-budget card is refused and the
+  // REST OF THE BATCH STILL LANDS: the batch is a transport detail, not a unit
+  // of meaning, and one careless card costing three rewrites is how a rule
+  // becomes something you route around. Untitled entries are dropped as before,
+  // and are excluded here so the ids below pair with the cards that produced them.
+  const titled = list.filter((raw) => String(raw?.title || '').trim());
+  const ok = [];
+  const bad = [];
+  for (const raw of titled) {
+    const m = measureCard(raw);
+    const over = overBudget(m);
+    (over.length ? bad : ok).push({ raw, m, over });
+  }
+
+  const added = ok.length ? mutate(p, (s) => addQuestions(s, ok.map((c) => c.raw))) : [];
   const after = load(p);
   const open = after.questions.filter((q) => q.status === 'open').length;
   const queued = after.questions.filter((q) => q.status === 'queued').length;
   process.stdout.write(`added ${added.length}: ${added.join(' ')} — ${open} open, ${queued} queued\n`);
+  // Every accepted card reports where it landed. This is the answer to "how do
+  // I know the limit before I hit it" — a `measure` verb would only help an
+  // author who remembered to run it, and the author who forgets is the same one
+  // who writes the long card. Printed on success, it calibrates continuously.
+  for (let i = 0; i < added.length; i++) {
+    const m = ok[i].m;
+    process.stdout.write(
+      `  ${added[i].padEnd(4)} ${m.paras}p ${m.figures}f ${String(m.chars).padStart(4)}c\n`);
+  }
+
+  if (!bad.length) return;
+  process.stderr.write(
+    `\n  ${bad.length} card${bad.length > 1 ? 's' : ''} REFUSED — the rest landed.\n`);
+  for (const c of bad) {
+    process.stderr.write(`    "${String(c.raw.title).slice(0, 56)}"\n      ${c.over.join(' · ')}\n`);
+  }
+  process.stderr.write(
+    `\n  A card over budget is a card with more than one thing in it. Split it: post the\n` +
+    `  first decision, then the rest as follow-ups with "parentId" set to it. There is no\n` +
+    `  cap on how many — a decision with six parts is six cards.\n` +
+    `  Do NOT get under the limit by cutting the table or the option costs. That is the\n` +
+    `  cheap way under and it removes what made the card decidable, which is the failure\n` +
+    `  the budget exists to prevent.\n` +
+    `  You may also revise the cards that just landed — retire them and re-post with the\n` +
+    `  same parentId; splitting one card usually leaves its siblings overlapping.\n`);
+  process.exitCode = 1;
 }
 
 function cmdNew() {
@@ -1506,7 +1683,20 @@ function cmdChange() {
   try { list = JSON.parse(src); } catch (e) { die(`changes JSON is invalid: ${e.message}`); }
   if (!Array.isArray(list)) list = [list];
   const me = whoami();
-  const out = mutate(p, (s) => logChanges(s, list, me));
+
+  // A review card is a card. Its prose obeys the same budget, for the same
+  // reason: a change you approve without understanding is the expensive version
+  // of the skimmed question — you find out weeks later, and you own the code.
+  const titled = list.filter((raw) => String(raw?.title || '').trim());
+  const ok = [], bad = [];
+  for (const raw of titled) {
+    const over = overBudget(measureChange(raw));
+    (over.length ? bad : ok).push({ raw, over });
+  }
+
+  const out = ok.length
+    ? mutate(p, (s) => logChanges(s, ok.map((c) => c.raw), me))
+    : { added: [], updated: [], unlinked: [] };
   const bits = [];
   if (out.added.length) bits.push(`logged ${out.added.join(' ')} as ${me}`);
   if (out.updated.length) bits.push(`rewrote ${out.updated.join(' ')} — their reviews reopened`);
@@ -1514,6 +1704,31 @@ function cmdChange() {
   // A change with no `because` is one nobody asked for. That is allowed —
   // groundwork exists — but it must be visible rather than quietly unlinked.
   for (const t of out.unlinked) process.stderr.write(`  no "because": ${t}\n`);
+
+  for (const c of ok) {
+    const n = diffLines(c.raw.diff);
+    if (n > BIG_DIFF_LINES) {
+      process.stderr.write(
+        `  ${n}-line diff: "${String(c.raw.title).slice(0, 52)}"\n` +
+        `    Not refused — but a diff this size is usually more than one thing, and each\n` +
+        `    thing wants its own card. Split it if it is; ignore this if it genuinely is not.\n`);
+    }
+  }
+
+  if (bad.length) {
+    process.stderr.write(
+      `\n  ${bad.length} change${bad.length > 1 ? 's' : ''} REFUSED — the rest logged.\n`);
+    for (const c of bad) {
+      process.stderr.write(`    "${String(c.raw.title).slice(0, 56)}"\n      ${c.over.join(' · ')}\n`);
+    }
+    process.stderr.write(
+      `\n  Measured on "title + summary + risk" only — the diff and the quoted decisions do\n` +
+      `  not count. So this is not "write less about it": a summary that needs more than\n` +
+      `  ${MAX_PARAS} paragraphs is describing more than one thing, and the fix is to LOG IT AS MORE\n` +
+      `  THAN ONE CHANGE — one per thing the reader must understand to say yes. Past three,\n` +
+      `  add a parent change saying how they fit.\n`);
+    process.exitCode = 1;
+  }
   warnStaleServer(p);
 }
 
@@ -1739,12 +1954,37 @@ const verbs = {
   claim: cmdClaim, release: cmdRelease, decisions: cmdDecisions,
 };
 
-if (!cmd || !verbs[cmd]) {
-  process.stderr.write(
-    'usage: board.mjs <serve|add|new|watch|retire|note|status|export|mcp|gateway|build|change|review|claim|release|decisions> --state <path>\n' +
-    '       agents sharing one board pass --as <name> to claim, log and drain independently\n' +
-    '       `decisions` is the lead\'s read: what every worker settled, without opening a diff\n'
-  );
-  process.exit(1);
+// The counter, exported so a test can run the SHIPPED one over SKILL.md's
+// worked examples. Agents copy the shape of an example far more reliably than
+// they follow the rule written above it, so an example that quietly drifts over
+// budget teaches the wrong card to everyone who reads it — and nothing else
+// would notice, because SKILL.md is prose and prose does not fail a build.
+export { measureCard, measureChange, overBudget, MAX_PARAS, MAX_FIGURES, MAX_CHARS };
+
+// Importing this file must not run a verb. Everything above is definitions; the
+// dispatch below is the only thing that acts, and it is gated on being the
+// process entry point rather than an import.
+//
+// Compared through realpath on BOTH sides, because this skill is normally
+// reached through a symlink (~/.claude/skills → ~/.agents/skills). Node
+// realpaths the main entry but not `import.meta.url`'s spelling, so a plain
+// string compare silently decides "this is an import" and every CLI call
+// becomes a no-op that exits 0 — measured: 42 of 53 checks failed with no error.
+const isMain = (() => {
+  try {
+    return !!process.argv[1] &&
+      realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch { return false; }
+})();
+
+if (isMain) {
+  if (!cmd || !verbs[cmd]) {
+    process.stderr.write(
+      'usage: board.mjs <serve|add|new|watch|retire|note|status|export|mcp|gateway|build|change|review|claim|release|decisions> --state <path>\n' +
+      '       agents sharing one board pass --as <name> to claim, log and drain independently\n' +
+      '       `decisions` is the lead\'s read: what every worker settled, without opening a diff\n'
+    );
+    process.exit(1);
+  }
+  await verbs[cmd]();
 }
-await verbs[cmd]();
