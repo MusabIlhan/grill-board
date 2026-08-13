@@ -486,10 +486,55 @@
   .card.review { border-left: 3px solid var(--accent); }
   .card.review.child { margin-left: 22px; }
   .chip.built { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
-  .prose pre.diff { line-height: 1.5; }
-  .prose pre.diff .add { color: var(--good); }
-  .prose pre.diff .del { color: var(--danger); }
-  .prose pre.diff .at { color: var(--ink-3); }
+  /* A diff is the one thing on a review card that cannot be skimmed as prose,
+     so it gets real structure rather than tinted text. The band carries the
+     add/del signal and the code itself stays near-normal ink — coloured text on
+     a coloured ground is the least readable of the options, and the row already
+     says which side it is on. The gutter is unselectable, so copying a diff
+     yields the code rather than a column of + and - down the left. */
+  .prose .diff {
+    margin: 0 0 .9em; border: 1px solid var(--line); border-radius: 9px;
+    overflow: hidden; background: var(--panel-2);
+    font: 12.5px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .diff .dfile {
+    padding: 7px 12px; font-weight: 600; color: var(--ink-2);
+    background: var(--panel); border-bottom: 1px solid var(--line);
+  }
+  .diff .dfile ~ .dfile { border-top: 1px solid var(--line); }
+  .diff .dhunk {
+    padding: 3px 12px; font-size: 11.5px; color: var(--ink-3);
+    background: color-mix(in srgb, var(--ink-3) 10%, transparent);
+    border-block: 1px solid var(--line);
+  }
+  .diff .dhunk + .dhunk, .diff .dfile + .dhunk { border-top: none; }
+  .diff .dat { opacity: .75; margin-left: 8px; }
+  /* Grid, so a wrapped line hangs under the code column instead of running
+     back under the gutter — and so nothing needs horizontal scrolling. */
+  .diff .dl { display: grid; grid-template-columns: 4ch 2ch 1fr; padding-right: 11px; }
+  .diff .no, .diff .mk { user-select: none; -webkit-user-select: none; font-style: normal; }
+  .diff .no { padding-right: 8px; text-align: right; font-size: 11px; color: var(--ink-3); opacity: .5; }
+  .diff .mk { text-align: center; color: var(--ink-3); opacity: .65; }
+  .diff .dl code {
+    background: none; border: none; padding: 0; font: inherit; color: var(--ink-2);
+    white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+  .diff .add { background: color-mix(in srgb, var(--good) 15%, transparent); }
+  .diff .del { background: color-mix(in srgb, var(--danger) 14%, transparent); }
+  .diff .add .mk { color: var(--good); opacity: 1; }
+  .diff .del .mk { color: var(--danger); opacity: 1; }
+  .diff .add code, .diff .del code { color: var(--ink); }
+  /* The tokens that actually moved. A tinted row says a line changed; on a
+     one-word edit that is the only part you already knew. */
+  .diff mark {
+    background: color-mix(in srgb, var(--good) 42%, transparent);
+    color: inherit; border-radius: 3px;
+  }
+  .diff .del mark { background: color-mix(in srgb, var(--danger) 40%, transparent); }
+  @media (max-width: 600px) {
+    .diff .dl { grid-template-columns: 2ch 1fr; }
+    .diff .no { display: none; }
+  }
   /* On an answered card, what that answer turned into. The loop closed. */
   .built-from { margin-top: 3px; font-size: 12px; color: var(--ink-3); }
   .built-from b { font-weight: 600; color: var(--accent); cursor: pointer; }
@@ -680,6 +725,158 @@
       .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
   }
 
+  // ---------------------------------------------------------------- diff
+  // Split on identifier runs, whitespace runs, and single punctuation, so a
+  // renamed variable is one token rather than a smear of characters.
+  const DTOK = /(\s+|[A-Za-z0-9_$]+|[^\sA-Za-z0-9_$])/g;
+
+  // Longest common subsequence over tokens. Only ever called on the middles of
+  // two single lines, after the shared head and tail have been sheared off.
+  function lcsMark(A, B) {
+    const m = A.length, n = B.length, W = n + 1;
+    const dp = new Uint16Array((m + 1) * W);
+    for (let i = m - 1; i >= 0; i--) {
+      for (let j = n - 1; j >= 0; j--) {
+        dp[i * W + j] = A[i] === B[j]
+          ? dp[(i + 1) * W + j + 1] + 1
+          : Math.max(dp[(i + 1) * W + j], dp[i * W + j + 1]);
+      }
+    }
+    const oa = [], ob = [];
+    let i = 0, j = 0;
+    while (i < m && j < n) {
+      if (A[i] === B[j]) { oa.push([1, A[i++]]); ob.push([1, B[j++]]); }
+      else if (dp[(i + 1) * W + j] >= dp[i * W + j + 1]) oa.push([0, A[i++]]);
+      else ob.push([0, B[j++]]);
+    }
+    while (i < m) oa.push([0, A[i++]]);
+    while (j < n) ob.push([0, B[j++]]);
+    return [oa, ob];
+  }
+
+  // What moved between a removed line and the line that replaced it. Returns
+  // null when the two are not an edit of one another at all.
+  function wordDiff(a, b) {
+    const A = a.match(DTOK) || [], B = b.match(DTOK) || [];
+    let h = 0;
+    while (h < A.length && h < B.length && A[h] === B[h]) h++;
+    let t = 0;
+    while (t < A.length - h && t < B.length - h && A[A.length - 1 - t] === B[B.length - 1 - t]) t++;
+    const ma = A.slice(h, A.length - t), mb = B.slice(h, B.length - t);
+    if (!ma.length && !mb.length) return null;
+
+    // Two lines sharing almost nothing are not an edit — they just happen to
+    // sit next to each other in the hunk. Marking every token then repaints the
+    // whole row, which is worse than not trying.
+    const la = a.trim().length || 1, lb = b.trim().length || 1;
+    if (ma.join('').trim().length / la > .72 && mb.join('').trim().length / lb > .72) return null;
+
+    let ca = ma.map((x) => [0, x]), cb = mb.map((x) => [0, x]);
+    // Above this the quadratic stops being free; the whole middle is marked
+    // instead, which is exactly what the old renderer did to every line anyway.
+    if (ma.length && mb.length && ma.length * mb.length <= 40000) [ca, cb] = lcsMark(ma, mb);
+    const kept = (arr) => arr.map((x) => [1, x]);
+    return [
+      [...kept(A.slice(0, h)), ...ca, ...kept(A.slice(A.length - t))],
+      [...kept(B.slice(0, h)), ...cb, ...kept(B.slice(B.length - t))],
+    ];
+  }
+
+  // Adjacent changed tokens merge into one mark — separate ones leave notches
+  // in the rounded corners and read as several edits instead of one.
+  function paint(parts) {
+    const out = [];
+    let buf = '';
+    const flush = () => {
+      if (!buf) return;
+      out.push(buf.trim() ? `<mark>${esc(buf)}</mark>` : esc(buf));
+      buf = '';
+    };
+    for (const [same, tok] of parts) {
+      if (same) { flush(); out.push(esc(tok)); } else buf += tok;
+    }
+    flush();
+    return out.join('');
+  }
+
+  const dline = (cls, no, mk, html) =>
+    `<div class="dl ${cls}"><span class="no">${no || ''}</span>` +
+    `<span class="mk">${mk}</span><code>${html || '&nbsp;'}</code></div>`;
+
+  function renderDiff(body) {
+    const src = String(body).split('\n');
+    const out = [];
+    let oldNo = 0, newNo = 0, lastFile = null, pendingOld = null;
+
+    const setFile = (name) => {
+      if (!name || name === lastFile) return;
+      lastFile = name;
+      out.push(`<div class="dfile">${esc(name)}</div>`);
+    };
+
+    // A removed line and the added line replacing it have to be held until the
+    // run ends, so each pair can be diffed against the other before either is
+    // written out.
+    let dels = [], adds = [];
+    const flushRun = () => {
+      const pairs = Math.min(dels.length, adds.length);
+      const marks = [];
+      for (let k = 0; k < pairs; k++) marks[k] = wordDiff(dels[k].text, adds[k].text);
+      dels.forEach((r, k) => out.push(dline('del', r.no, '-', marks[k] ? paint(marks[k][0]) : esc(r.text))));
+      adds.forEach((r, k) => out.push(dline('add', r.no, '+', marks[k] ? paint(marks[k][1]) : esc(r.text))));
+      dels = []; adds = [];
+    };
+
+    for (let i = 0; i < src.length; i++) {
+      const line = src[i];
+
+      // `---` and `+++` begin with the same characters as a removed and an
+      // added line, so testing those first paints the two file headers red and
+      // green — which this render exists to stop. What actually distinguishes
+      // them is the pairing: a file header is a `---` whose next line is `+++`.
+      // A removed SQL comment or markdown rule never has that.
+      const isOld = /^--- /.test(line) && /^\+\+\+ /.test(src[i + 1] || '');
+      const isNew = /^\+\+\+ /.test(line) && /^--- /.test(src[i - 1] || '');
+      const strip = (s) => s.slice(4).replace(/\t.*$/, '').trim();
+
+      if (isOld) { flushRun(); pendingOld = strip(line); continue; }
+      if (isNew) {
+        flushRun();
+        const n = strip(line);
+        setFile((n === '/dev/null' ? pendingOld : n).replace(/^[ab]\//, ''));
+        pendingOld = null;
+        continue;
+      }
+      if (/^diff --git /.test(line)) {
+        flushRun();
+        const m = line.match(/ b\/(.+)$/);
+        if (m) setFile(m[1]);
+        continue;
+      }
+      if (/^(index |old mode|new mode|new file|deleted file|similarity index|rename |copy |Binary files|GIT binary|\\ No newline)/.test(line)) {
+        flushRun();
+        continue;
+      }
+      if (/^@@/.test(line)) {
+        flushRun();
+        const m = line.match(/^@@+ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@+(.*)$/);
+        oldNo = m ? +m[1] : 0;
+        newNo = m ? +m[2] : 0;
+        const where = m && m[3].trim() ? `<span class="dat">${esc(m[3].trim())}</span>` : '';
+        out.push(`<div class="dhunk">${esc(m ? `@@ -${m[1]} +${m[2]} @@` : line)}${where}</div>`);
+        continue;
+      }
+
+      if (line[0] === '-') { dels.push({ no: oldNo++, text: line.slice(1) }); continue; }
+      if (line[0] === '+') { adds.push({ no: newNo++, text: line.slice(1) }); continue; }
+      flushRun();
+      out.push(dline('ctx', newNo, ' ', esc(line.replace(/^ /, ''))));
+      oldNo++; newNo++;
+    }
+    flushRun();
+    return `<div class="diff">${out.join('')}</div>`;
+  }
+
   function md(src) {
     if (!src) return '';
     const lines = String(src).replace(/\r\n?/g, '\n').split('\n');
@@ -704,14 +901,8 @@
         while (i < lines.length && !close.test(lines[i])) buf.push(lines[i++]);
         i++;
         const body = buf.join('\n');
-        if (open[2] === 'diff') {
-          // Tint by line, so a long diff can be skimmed for what moved.
-          const rows = body.split('\n').map((l) => {
-            const k = l.startsWith('+') ? 'add' : l.startsWith('-') ? 'del' : /^@@|^diff |^index |^---|^\+\+\+/.test(l) ? 'at' : '';
-            return k ? `<span class="${k}">${esc(l)}</span>` : esc(l);
-          });
-          out.push(`<pre class="diff"><code>${rows.join('\n')}</code></pre>`);
-        } else out.push(`<pre><code>${esc(body)}</code></pre>`);
+        if (open[2] === 'diff') out.push(renderDiff(body));
+        else out.push(`<pre><code>${esc(body)}</code></pre>`);
         continue;
       }
 
