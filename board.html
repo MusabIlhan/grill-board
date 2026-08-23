@@ -430,6 +430,10 @@
   .phase[hidden] { display: none; }
   .phase.building { color: var(--warn); background: color-mix(in srgb, var(--warn) 13%, transparent); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
   .phase.review { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+  .phase.testing { color: var(--warn); background: color-mix(in srgb, var(--warn) 13%, transparent); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+  /* Not a colour for work in progress — nothing is in progress. It reads as a
+     thing waiting on you, which is what every other pill on this board is not. */
+  .phase.planned { color: var(--good); background: color-mix(in srgb, var(--good) 13%, transparent); border-color: color-mix(in srgb, var(--good) 42%, transparent); }
 
   details.build {
     background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
@@ -481,11 +485,44 @@
   .crew .who.busy { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 38%, transparent); }
   .crew .who b { font-weight: 600; }
 
+  /* The one control on this board that starts something rather than answers
+     something. It sits at the foot of the plan, after the steps, because the
+     order it wants to be read in is "here is what I would do" then "go". */
+  .gostrip {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 13px 18px 15px; border-top: 1px solid var(--line);
+    background: color-mix(in srgb, var(--good) 6%, transparent);
+  }
+  /* Ink-on-background, exactly like `.send`, rather than a green fill: `--good`
+     is a status colour and was audited as text, not as a text BACKGROUND. On
+     Nord dark it comes out at 3.0:1 under this label, which is under AA — and
+     the one button on the board that must not be missed is the wrong place to
+     be the one element that fails it. Prominence comes from size and from the
+     strip it sits in. */
+  .go {
+    font: inherit; font-size: 14.5px; font-weight: 650;
+    background: var(--ink); color: var(--bg); border: 1px solid var(--ink);
+    padding: 9px 22px; border-radius: 9px; cursor: pointer;
+    flex: none; white-space: nowrap;
+  }
+  .go:not(:disabled):hover { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .go:disabled { opacity: .45; cursor: default; }
+  .gowhy { font-size: 13px; color: var(--ink-3); }
+
   /* A review card is not a question — it is code that already exists. The rail
      says so at a glance, so a diff is never mistaken for a proposal. */
   .card.review { border-left: 3px solid var(--accent); }
   .card.review.child { margin-left: 22px; }
   .chip.built { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+  /* A test card asks for your hands, not your opinion — the only card on the
+     board you cannot answer from the chair you are sitting in. It gets the
+     warn rail rather than the accent one so a checklist item is never mistaken
+     for a change waiting on a verdict. */
+  .card.test { border-left: 3px solid var(--warn); }
+  .chip.totest {
+    color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent);
+    border-color: color-mix(in srgb, var(--warn) 38%, transparent);
+  }
   /* A diff is the one thing on a review card that cannot be skimmed as prose,
      so it gets real structure rather than tinted text. The band carries the
      add/del signal and the code itself stays near-normal ink — coloured text on
@@ -1093,7 +1130,8 @@
     const pill = document.getElementById('phase');
     pill.hidden = phase === 'grilling';
     pill.className = `phase ${phase}`;
-    pill.textContent = phase === 'building' ? 'building' : phase === 'review' ? 'review' : phase;
+    pill.textContent = phase === 'planned' ? 'ready to build'
+      : phase === 'building' ? 'building' : phase === 'review' ? 'review' : phase;
 
     questions = s.questions || [];
     render();
@@ -1122,11 +1160,14 @@
     const failed = steps.filter((x) => x.status === 'failed').length;
     // Open while it is happening; folded once it is history and the review
     // cards below are the thing to look at.
-    const open = buildOpen === null ? phase !== 'review' : buildOpen;
+    const built = phase === 'review' || phase === 'testing';
+    const open = buildOpen === null ? !built : buildOpen;
     const crew = Object.keys(workers);
-    const head = phase === 'review'
-      ? `Built — ${steps.length} step${steps.length === 1 ? '' : 's'}, ${changes.length} change${changes.length === 1 ? '' : 's'}`
-      : crew.length > 1 ? `Building what you decided — ${crew.length} agents` : 'Building what you decided';
+    const head = phase === 'planned'
+      ? `Here's the plan — ${steps.length} step${steps.length === 1 ? '' : 's'}`
+      : built
+        ? `Built — ${steps.length} step${steps.length === 1 ? '' : 's'}, ${changes.length} change${changes.length === 1 ? '' : 's'}`
+        : crew.length > 1 ? `Building what you decided — ${crew.length} agents` : 'Building what you decided';
     // A step still waiting on another is not idle, it is blocked. Saying which
     // one keeps a queue that has stalled from looking like one that is slow.
     const doneIds = new Set(steps.filter((x) => x.status === 'done').map((x) => x.id));
@@ -1166,6 +1207,10 @@
         return `<span class="who ${on.length ? 'busy' : ''}" title="${esc(workers[n].note || '')}">
           <b>${esc(n)}</b> ${label}</span>`;
       }).join('')}</div>` : ''}
+      ${phase === 'planned' ? `<div class="gostrip">
+        <button class="go" id="startBuild">Start building</button>
+        <span class="gowhy">Nothing is written until you press this.</span>
+      </div>` : ''}
     </details>`;
   }
 
@@ -1211,6 +1256,13 @@
       `<div class="working"><span class="pulse"></span><span class="lines">` +
       `<span class="lead">${lead}</span><span class="sub${warn ? ' warn' : ''}">${sub}</span></span></div>`;
 
+    // The board is holding still on purpose. Every other line here reports work
+    // in flight; this one has to say the opposite clearly enough that nobody
+    // waits for a build that is waiting for them.
+    if (phase === 'planned') {
+      return line(`Here is the plan — ${steps.length} step${steps.length === 1 ? '' : 's'}. Nothing has been built.`,
+        'Read it, then press Start building. Claude will not begin on its own.');
+    }
     if (phase === 'building') {
       const done = steps.filter((x) => x.status === 'done').length;
       const sent = changes.length;
@@ -1226,6 +1278,17 @@
       // anything still coming".
       return line('Building what you decided — each change comes back here to review.',
         bits.join(' · '), done > 0 && !sent);
+    }
+    if (phase === 'testing') {
+      const left = questions.filter((q) => q.kind === 'test' && q.status === 'open').length;
+      // The one place the board asks for something it cannot do itself, so it
+      // says what happens after rather than leaving the list looking like the end.
+      if (left) return line(`${left} thing${left === 1 ? '' : 's'} to try — tick each one off.`,
+        'Say what you saw on anything that does not work and I fix it · the changes go up for review once the list is clear');
+      const broke = questions.filter((q) => q.kind === 'test' && (q.answer?.keys || [])[0] === 'fail').length;
+      return broke
+        ? line(`${broke} of them did not work.`, 'Claude is fixing those — they come back here to try again', true)
+        : line('Checklist clear.', 'Putting the changes up for review');
     }
     if (phase === 'review') {
       const waiting = questions.filter((q) => q.kind === 'review' && q.status === 'open').length;
@@ -1544,6 +1607,7 @@
     }
 
     if (q.kind === 'review') cls.push('review');
+    if (q.kind === 'test') cls.push('test');
 
     const isNew = !seenIds.has(q.id) && !firstLoad;
     if (isNew) cls.push('is-new');
@@ -1564,6 +1628,7 @@
       <div class="card-meta">
         ${isNew ? '<span class="chip new">new</span>' : ''}
         ${q.kind === 'review' ? `<span class="chip built">${esc(changeAuthor(q.changeId) || 'written')} · ${esc(q.changeId || '')}</span>` : ''}
+        ${q.kind === 'test' ? `<span class="chip totest">try it · ${esc(q.testId || '')}</span>` : ''}
         <span class="chip">${esc(q.thread)}</span>
         <span class="qid">${q.id}${q.multi ? ' · pick any' : ''}</span>
       </div>
@@ -1573,7 +1638,7 @@
       ${q.recommendation ? `<details class="take" data-take="${q.id}"><summary>${q.kind === 'review' ? 'What I\'m least sure about' : 'Claude\'s take'}</summary><div class="prose">${md(q.recommendation)}</div></details>` : ''}
       ${opts ? `<div class="options">${opts}</div>` : ''}
       <div class="own ${ci === q.options.length ? 'cursor' : ''}">
-        <textarea data-own="${q.id}" rows="1" placeholder="${q.kind === 'review' ? 'What to change, or anything that looks off…' : q.options.length ? 'Other — in your own words…' : 'Your answer…'}">${esc(draft)}</textarea>
+        <textarea data-own="${q.id}" rows="1" placeholder="${q.kind === 'test' ? 'What happened — what you saw, and where…' : q.kind === 'review' ? 'What to change, or anything that looks off…' : q.options.length ? 'Other — in your own words…' : 'Your answer…'}">${esc(draft)}</textarea>
       </div>
       <div class="actions">
         <button class="send" data-send="${q.id}" ${picked.size || draft.trim() ? '' : 'disabled'}>Send</button>
@@ -1692,6 +1757,8 @@
     });
     const panel = document.getElementById('buildPanel');
     if (panel) panel.ontoggle = () => { buildOpen = panel.open; };
+    const go = document.getElementById('startBuild');
+    if (go) go.onclick = () => startBuild(go);
     // From a decision to the code it produced. Clicking the card underneath
     // would re-open the answered question instead, so stop there.
     feed.querySelectorAll('[data-goto]').forEach((b) => {
@@ -1720,6 +1787,30 @@
     } catch {
       setOffline(true);
     } finally { inflight.delete(qid); }
+  }
+
+  // The go-ahead, and the only thing on this board that puts work in motion.
+  // It is deliberately NOT optimistic: everywhere else the page assumes the
+  // write landed so the feed does not stutter, but here a button that says
+  // "started" on a request that never arrived would have someone waiting on a
+  // build nobody is doing. It stays pressed until the server has said yes.
+  async function startBuild(btn) {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = 'Starting…';
+    try {
+      await post('/api/start', {});
+      lastRev = null;   // pull the new phase straight away rather than on the next tick
+    } catch (e) {
+      // A refusal is not an outage. Two tabs open on one board is enough to
+      // press this twice, and the second press comes back "already started" —
+      // an offline banner there would be a lie about a board that is fine. Let
+      // the next poll draw whatever actually happened.
+      if (String(e.message || '').includes('"ok":false')) { lastRev = null; return; }
+      setOffline(true);
+      btn.disabled = false;
+      btn.textContent = 'Start building';
+    }
   }
 
   // The three ways of saying "I can't answer this yet". None of them is an
@@ -1979,6 +2070,12 @@
       if (typing) { e.preventDefault(); document.activeElement.blur(); }
       return;
     }
+    // Tabbing to Start building is the keyboard route to it, and space/enter on
+    // a focused button is the browser's own click. Deliberately there is no
+    // letter shortcut: a single keystroke that starts a build is exactly the
+    // accident this button exists to make impossible. So hand the keyboard over
+    // while it has focus rather than firing a card shortcut underneath it.
+    if (active && active.id === 'startBuild') return;
     if (typing || dlg.open || helpDlg.open) return;
 
     // ⌘↵ / ctrl↵ is the send, and it is the SAME gesture the note field uses.

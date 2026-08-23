@@ -309,6 +309,7 @@ function addQuestions(s, list) {
       // hand, and answering one is a verdict on code rather than a decision.
       kind: raw.kind || 'question',
       changeId: raw.changeId || null,
+      testId: raw.testId || null,
       context: raw.context || '',
       recommendation: raw.recommendation || '',
       options: (raw.options || []).map((o, i) => ({
@@ -350,9 +351,37 @@ function ensureWork(s) {
   if (!s.build) s.build = { startedAt: null, finishedAt: null, steps: [] };
   if (!Array.isArray(s.changes)) s.changes = [];
   if (!s.nextChange) s.nextChange = 1;
+  if (!Array.isArray(s.tests)) s.tests = [];
+  if (!s.nextTest) s.nextTest = 1;
   if (!s.workers) s.workers = {};
   if (!s.cursors) s.cursors = {};
   return s;
+}
+
+// The one thing on this board the user has to start by hand. A plan that began
+// on its own is a plan nobody agreed to — the questions bought agreement about
+// WHAT to do, not permission to go and do it now — so `build --file` only puts
+// the steps up, and this is what lets work begin.
+const buildApproved = (s) => !!(s.build && s.build.approvedAt);
+
+function approveBuild(s) {
+  ensureWork(s);
+  if (!s.build.steps.length) return { ok: false, why: 'there is no plan to start' };
+  if (s.build.approvedAt) return { ok: false, why: 'already started', at: s.build.approvedAt };
+  s.build.approvedAt = new Date().toISOString();
+  s.build.startedAt = s.build.startedAt || s.build.approvedAt;
+  s.phase = 'building';
+  pushEvent(s, { type: 'start', steps: s.build.steps.length });
+  return { ok: true, at: s.build.approvedAt, steps: s.build.steps.length };
+}
+
+// Everything that would put work in motion goes through here, so the button is
+// the only way in rather than the polite way in.
+function refuseUnstarted(s) {
+  if (buildApproved(s)) return null;
+  return !s.build || !s.build.steps.length
+    ? 'no plan has been posted yet'
+    : 'the plan is up but has not been started — they have to press Start building on the board';
 }
 
 // ------------------------------------------------------------- who is here
@@ -539,6 +568,150 @@ function logChanges(s, list, author) {
   return { added, updated, unlinked };
 }
 
+// ------------------------------------------------------------------ testing
+// A review asks whether the code READS right. That is not the same question as
+// whether it WORKS, and only one of the two can be answered by looking at a
+// diff. So the build hands over a checklist first: the things to go and try,
+// each naming the changes it covers. Reviews wait until that list is resolved —
+// a verdict on code that turns out not to work was wasted, and the fix would
+// force the review again anyway.
+
+const RESULTS = { pass: 'works', fail: "doesn't work", skip: "can't test this now" };
+
+function testCard(s, t) {
+  const covers = (t.because || [])
+    .map((id) => (s.changes.find((c) => c.id === id) || {}).title)
+    .filter(Boolean);
+  const out = [];
+  if (t.how) out.push(t.how.trim(), '');
+  if (t.expect) out.push(`**Should happen:** ${t.expect}`, '');
+  if (covers.length) {
+    out.push(covers.length === 1 ? '*Covers this change:*' : '*Covers these changes:*', '');
+    for (const c of covers) out.push(`- ${c}`);
+    out.push('');
+  }
+  if (t.attempt > 1) {
+    const last = (t.tries || []).filter((x) => x.result === 'fail').pop();
+    out.push(`*Attempt ${t.attempt}${t.fixNote ? ` — ${t.fixNote}` : ' — rewritten after it failed'}.*`, '');
+    if (last && last.text) out.push(`> Last time: ${last.text}`, '');
+  }
+  return {
+    thread: 'Testing',
+    kind: 'test',
+    testId: t.id,
+    title: t.title,
+    spoken: t.spoken || `Can you check this for me: ${t.title}`,
+    spokenDetail: t.how || '',
+    context: out.join('\n').trim(),
+    options: [
+      // No `recommended` anywhere here, unlike every other card on the board. A
+      // ★ reading "Claude's pick" against `Works` is the board predicting the
+      // result of a test it is asking someone else to run — which is the one
+      // thing a checklist exists not to do.
+      { key: 'pass', label: 'Works', detail: 'Does what it should.' },
+      // The detail is the whole point of the button. A bare red tick means the
+      // next move is a question asking what happened, which is a round trip
+      // through the person who already had the answer in front of them.
+      { key: 'fail', label: "Doesn't work", detail: 'Say what you saw — that is what I fix from.' },
+      { key: 'skip', label: "Can't test now", detail: 'Not blocked on it; the review goes ahead without this one.' },
+    ],
+  };
+}
+
+function logTests(s, list, author) {
+  ensureWork(s);
+  if (author) touchWorker(s, author);
+  const added = [];
+  for (const raw of list) {
+    const title = String(raw.title || '').trim();
+    if (!title) continue;
+    s.tests.push({
+      id: `t${s.nextTest++}`,
+      title,
+      how: String(raw.how || '').trim(),
+      expect: String(raw.expect || '').trim(),
+      spoken: String(raw.spoken || '').trim(),
+      because: (raw.because || []).map(String),
+      step: raw.step || null,
+      by: author || null,
+      attempt: 1,
+      tries: [],
+      cardId: null,
+      at: new Date().toISOString(),
+    });
+    added.push(s.tests[s.tests.length - 1].id);
+  }
+  return added;
+}
+
+// The verdict on one test, or null while it is still out.
+function resultOf(s, t) {
+  const q = s.questions.find((x) => x.id === t.cardId);
+  if (!q || q.status !== 'answered' || !q.answer) return null;
+  const key = (q.answer.keys || [])[0] || null;
+  return { key, label: RESULTS[key] || (key || 'in their own words'), text: q.answer.text || '' };
+}
+
+const testsOutstanding = (s) =>
+  (s.tests || []).filter((t) => t.cardId && !resultOf(s, t));
+
+// What stands between the checklist and the review. A test that has not been
+// ticked off blocks, and so does one that FAILED: the fix is going to rewrite
+// the change, and a verdict given on the version that did not work would have
+// to be asked for all over again. `skip` is the deliberate way past — it says
+// "I cannot try this now", which is a decision rather than a defect.
+const testsBlocking = (s) =>
+  (s.tests || []).filter((t) => {
+    if (!t.cardId) return false;
+    const r = resultOf(s, t);
+    return !r || r.key === 'fail';
+  });
+
+function mintTests(s) {
+  ensureWork(s);
+  const pending = s.tests.filter((t) => !t.cardId && t.title);
+  // Nothing to put up means nothing changes. `test --up` on an empty checklist
+  // used to flip the board to `testing` anyway and then report that it had
+  // added nothing — a header saying "go and try these" over a list of none.
+  if (!pending.length) return [];
+  s.build.finishedAt = s.build.finishedAt || new Date().toISOString();
+  s.phase = 'testing';
+  // Same reasoning as the review batch: a checklist revealed a few at a time
+  // cannot be planned around, and you cannot tell how much testing is left.
+  const openNow = s.questions.filter((q) => q.status === 'open').length;
+  s.maxOpen = Math.max(s.maxOpen || DEFAULT_MAX_OPEN, openNow + pending.length);
+  const ids = addQuestions(s, pending.map((t) => testCard(s, t)));
+  pending.forEach((t, i) => { t.cardId = ids[i]; });
+  return ids;
+}
+
+// Reopen a failed test after a fix. Same shape as a review card reopening at
+// revision 2: the card comes back at attempt 2 carrying what failed last time,
+// so retesting never starts from "what was wrong with this again?".
+function retryTest(s, id, fixNote) {
+  ensureWork(s);
+  const t = s.tests.find((x) => x.id === id);
+  if (!t) return { ok: false, why: `no test ${id}` };
+  const q = s.questions.find((x) => x.id === t.cardId);
+  if (!q) return { ok: false, why: `${id} was never put up` };
+  const prev = resultOf(s, t);
+  if (prev) t.tries.push({ at: new Date().toISOString(), result: prev.key, text: prev.text });
+  t.attempt++;
+  t.fixNote = String(fixNote || '').trim();
+  const fresh = testCard(s, t);
+  Object.assign(q, {
+    status: 'open', openedAt: new Date().toISOString(), answer: null, ask: null,
+    title: fresh.title, spoken: fresh.spoken, spokenDetail: fresh.spokenDetail,
+    context: fresh.context,
+    options: fresh.options.map((o) => ({ key: o.key, label: o.label, detail: o.detail, recommended: !!o.recommended })),
+  });
+  // A retry drops the board out of review and back into testing — otherwise a
+  // board that had moved on shows a reopened checklist under a "reviewing"
+  // header, and the phase stops describing what is actually being asked.
+  s.phase = 'testing';
+  return { ok: true, id: t.id, attempt: t.attempt, cardId: q.id };
+}
+
 function mintReviews(s) {
   ensureWork(s);
   const pending = s.changes.filter((c) => !c.reviewId && c.title);
@@ -576,8 +749,17 @@ function recordAnswer(p, body) {
       // going back to look up which change the card belonged to.
       kind: q.kind || 'question',
       changeId: q.changeId || null,
+      testId: q.testId || null,
       because: q.changeId ? ((cur.changes || []).find((c) => c.id === q.changeId) || {}).because || [] : undefined,
     });
+    // Ticking the last thing off the checklist is what releases the review, and
+    // it has to happen HERE rather than when the agent next drains: otherwise a
+    // board whose owner finished testing at midnight sits on a settled
+    // checklist showing nothing to do until a session wakes up to mint them.
+    if (cur.phase === 'testing' && (cur.tests || []).length && !testsBlocking(cur).length) {
+      const ids = mintReviews(cur);
+      if (ids.length) pushEvent(cur, { type: 'reviews', ids });
+    }
     return { ok: true, id: q.id };
   });
 }
@@ -719,8 +901,12 @@ function callTool(p, name, a = {}) {
       return `"${s.title}" — nothing open right now. Claude may still be writing; try again shortly.`;
     }
     const reviewing = open.some((q) => q.kind === 'review');
+    const testing = open.some((q) => q.kind === 'test');
+    const what = testing
+      ? '; these are things to go and try, not decisions to make'
+      : reviewing ? '; these are finished changes to review, not decisions to make' : '';
     return [
-      `"${s.title}" — ${open.length} open${reviewing ? '; these are finished changes to review, not decisions to make' : ''}.`,
+      `"${s.title}" — ${open.length} open${what}.`,
       '', ...open.map((q) => describeQuestion(q) + '\n'),
     ].join('\n');
   }
@@ -766,6 +952,13 @@ function callTool(p, name, a = {}) {
     if (s.phase === 'building' && s.build) {
       const done = s.build.steps.filter((x) => x.status === 'done').length;
       return `${base} The questions are done — Claude is building, ${done} of ${s.build.steps.length} steps.`;
+    }
+    if (s.phase === 'testing') {
+      const put = (s.tests || []).filter((t) => t.cardId);
+      const left = testsOutstanding(s).length;
+      const bad = put.filter((t) => (resultOf(s, t) || {}).key === 'fail').length;
+      return `${base} The build is done and there are ${put.length} thing${put.length === 1 ? '' : 's'} to try — ` +
+        `${left} not ticked off yet${bad ? `, ${bad} reported broken` : ''}. The changes go up for review once the list is clear.`;
     }
     if (s.phase === 'review') {
       const out = (s.changes || []).filter((ch) => ch.reviewId);
@@ -1017,6 +1210,11 @@ function makeHandler(boardPath) {
         return json(res, 200, { ok: true, prefs: next });
       }
 
+      if (req.method === 'POST' && url.pathname === '/api/start') {
+        const out = mutate(p, (cur) => approveBuild(cur));
+        return json(res, out.ok ? 200 : 409, out);
+      }
+
       if (req.method === 'POST' && url.pathname === '/api/message') {
         const body = await readBody(req);
         mutate(p, (cur) => {
@@ -1152,6 +1350,16 @@ function describe(ev) {
       const from = (ev.because || []).length ? ` from ${ev.because.join(',')}` : '';
       return `[review] ${ev.changeId}${from} — ${verdict}${note}`;
     }
+    // A failed test is the loudest thing this board produces: it is the only
+    // event that says the work is wrong rather than that an opinion differs.
+    if (ev.kind === 'test') {
+      const key = (ev.answer.keys || [])[0];
+      if (key === 'fail') {
+        return `[test] ${ev.testId} FAILED — ${ev.title}\n` +
+          `    ${ev.answer.text ? ev.answer.text : '(no detail given — ask what they saw before changing anything)'}`;
+      }
+      return `[test] ${ev.testId} ${RESULTS[key] || 'in their own words'} — ${ev.title}${note}`;
+    }
     return `[answer] ${ev.id} (${ev.thread}) picked ${picked}${note}`;
   }
   if (ev.type === 'ask') {
@@ -1163,6 +1371,10 @@ function describe(ev) {
     return `[ask:${ev.kind}] ${ev.id} (${ev.thread}) ${want}`;
   }
   if (ev.type === 'message') return `[message] ${JSON.stringify(String(ev.text).slice(0, 160))}`;
+  // The go-ahead. Until this arrives the plan is a proposal, and the session
+  // has nothing to do but wait — so this is the wake it is waiting for.
+  if (ev.type === 'start') return `[start] they pressed Start building — ${ev.steps} step${ev.steps === 1 ? '' : 's'} approved, begin now`;
+  if (ev.type === 'reviews') return `[review] checklist done — ${ev.ids.length} change${ev.ids.length === 1 ? '' : 's'} now up: ${ev.ids.join(' ')}`;
   // A step landing is the lead's wake, and the line carries the handback rather
   // than pointing at it — the lead should not have to run a second command, let
   // alone open the diff, to find out what its worker settled on.
@@ -1227,7 +1439,24 @@ async function cmdWatch() {
       // should start, once when every change has a verdict. They call for
       // opposite work, so they are not the same line.
       const reviewed = (s.changes || []).filter((x) => x.reviewId);
-      if (s.phase === 'review' && reviewed.length) {
+      const put = (s.tests || []).filter((t) => t.cardId);
+      // A checklist that emptied with failures on it is not a drain — it is the
+      // one state on this board that means "go and fix something", and saying
+      // "board empty" over the top of it would bury the only line that matters.
+      if (s.phase === 'testing' && put.length) {
+        const tally = { pass: 0, fail: 0, skip: 0, other: 0 };
+        for (const t of put) {
+          const r = resultOf(s, t);
+          tally[r && tally[r.key] !== undefined ? r.key : 'other']++;
+        }
+        const failed = put.filter((t) => (resultOf(s, t) || {}).key === 'fail');
+        process.stdout.write(
+          `[tested] ${tally.pass} passed, ${tally.fail} failed` +
+          `${tally.skip ? `, ${tally.skip} skipped` : ''}${tally.other ? `, ${tally.other} in their own words` : ''}\n` +
+          failed.map((t) => `    ${t.id} ${t.title} — ${(resultOf(s, t) || {}).text || '(no detail given)'}`).join('\n') +
+          (failed.length ? '\n' : '')
+        );
+      } else if (s.phase === 'review' && reviewed.length) {
         const tally = { ok: 0, revise: 0, reopen: 0, other: 0 };
         for (const ch of reviewed) {
           const v = verdictOf(s, ch);
@@ -1269,6 +1498,11 @@ function cmdBuild() {
       ensureWork(s);
       const st = s.build.steps.find((x) => x.id === args.step);
       if (!st) return null;
+      // The same gate as `claim`, because moving a step is the other way work
+      // starts. Recording a `--decided` on an unstarted plan is harmless and
+      // stays allowed; putting a step into `running` or `done` is not.
+      const shut = moving ? refuseUnstarted(s) : null;
+      if (shut) return { denied: shut };
       // Only the holder moves a claimed step. A single-agent build claims
       // nothing and owns nothing, so it passes straight through — the check
       // only bites once someone has actually taken the work.
@@ -1302,7 +1536,10 @@ function cmdBuild() {
       // at all — worse than the silence it replaces. So that case stays in
       // `building` and is reported as the debt it is.
       const logged = s.changes.filter((c) => c.title).length;
-      const minted = settled && logged ? mintReviews(s) : [];
+      // Tests come first when there are any. Reviews are minted later, by the
+      // answer that resolves the last one — see recordAnswer.
+      const untested = s.tests.filter((t) => !t.cardId && t.title).length;
+      const minted = settled && logged ? (untested ? mintTests(s) : mintReviews(s)) : [];
       // The lead is not watching this board — it is waiting on an event stream.
       // Without this, a fanned-out build reaches it as silence: no wake when a
       // step lands, so the only way to find out is to poll, and the only way to
@@ -1316,7 +1553,10 @@ function cmdBuild() {
           changes: s.changes.filter((c) => c.step === st.id).map((c) => c.id),
         });
       }
-      return { ...st, minted, moved: true, owed: settled && !logged };
+      return {
+        ...st, minted, moved: true, owed: settled && !logged,
+        tested: !!untested, noTests: settled && !!logged && !s.tests.length,
+      };
     });
     if (!out) die(`no build step ${args.step}`);
     if (out.denied) die(out.denied);
@@ -1332,12 +1572,22 @@ function cmdBuild() {
       process.stderr.write(`  ${out.id} settled with no --decided: whoever picks this up next cannot tell what you chose\n`);
     }
     if (out.minted.length) {
-      process.stdout.write(`build finished — ${out.minted.length} change${out.minted.length === 1 ? '' : 's'} up for review: ${out.minted.join(' ')}\n`);
+      process.stdout.write(out.tested
+        ? `build finished — ${out.minted.length} thing${out.minted.length === 1 ? '' : 's'} to test: ${out.minted.join(' ')}\n` +
+          '  the changes go up for review once that list is clear\n'
+        : `build finished — ${out.minted.length} change${out.minted.length === 1 ? '' : 's'} up for review: ${out.minted.join(' ')}\n`);
     }
     warnStaleServer(p);
     if (out.owed) {
       process.stdout.write('every step is settled and NO change has been logged — there is nothing to review.\n' +
         '  Log what you wrote with `change`, one entry per change, each naming the questions behind it.\n');
+    }
+    // Not an error — some builds genuinely have nothing to try by hand. But it
+    // is the default that has to be argued out of, so it says so rather than
+    // letting a build reach review having never been run.
+    if (out.noTests) {
+      process.stderr.write('no test authored — these changes go to review without anyone having run them.\n' +
+        '  `test --file` takes a checklist: what to do, what should happen, which change it covers.\n');
     }
     return;
   }
@@ -1346,10 +1596,26 @@ function cmdBuild() {
   let list;
   try { list = JSON.parse(src); } catch (e) { die(`build plan JSON is invalid: ${e.message}`); }
   if (!Array.isArray(list)) list = [list];
-  const ids = mutate(p, (s) => {
+  const out = mutate(p, (s) => {
     ensureWork(s);
-    s.phase = 'building';
-    s.build.startedAt = s.build.startedAt || new Date().toISOString();
+    // Declaring the plan does NOT start it. The board goes to `planned` and
+    // waits for the button — nobody should come back to a board and find that
+    // the thing they were about to read has already been half-built. The gate
+    // is enforced in `claim` and in every step move, not just drawn on the
+    // page, because a rule an agent can walk past is not a rule.
+    //
+    // Re-posting a plan that has not started REPLACES it. The gate creates a
+    // window that never existed before — a plan sat in front of someone who can
+    // argue with it — and the answer to "cut step 3" has to be a plan with two
+    // steps, not one with five. Appending is right the moment work begins:
+    // a step added mid-build is an addition, and by then the old steps have
+    // owners, notes and changes hanging off them.
+    let replaced = 0;
+    if (!s.build.approvedAt) {
+      s.phase = 'planned';
+      replaced = s.build.steps.length;
+      s.build.steps = [];
+    }
     const added = [];
     for (const raw of list) {
       const title = String(raw.title || '').trim();
@@ -1368,9 +1634,14 @@ function cmdBuild() {
       });
       added.push(id);
     }
-    return added;
+    return { added, replaced };
   });
-  process.stdout.write(`building — ${ids.length} step${ids.length === 1 ? '' : 's'}: ${ids.join(' ')}\n`);
+  const { added: ids, replaced } = out;
+  process.stdout.write(load(p).build.approvedAt
+    ? `building — ${ids.length} step${ids.length === 1 ? '' : 's'}: ${ids.join(' ')}\n`
+    : `plan up — ${ids.length} step${ids.length === 1 ? '' : 's'}: ${ids.join(' ')}` +
+      `${replaced ? ` (replacing the ${replaced} posted before)` : ''}\n` +
+      '  NOT started. They press Start building on the board; you wait for [start] before touching anything.\n');
   warnStaleServer(p);
 }
 
@@ -1385,6 +1656,11 @@ function cmdClaim() {
     touchWorker(s, me, args.note !== undefined ? { note: String(args.note) } : {});
     const steps = s.build.steps;
     if (!steps.length) return { ok: false, why: 'no build plan yet' };
+    // Exit 3, the same as "nothing takeable yet" — a worker that spun up early
+    // waits rather than dies, and the loop it is already in does the right
+    // thing without knowing this gate exists.
+    const shut = refuseUnstarted(s);
+    if (shut) return { ok: false, why: shut };
 
     const target = args.steal && args.steal !== true ? String(args.steal) : args.step && args.step !== true ? String(args.step) : null;
     let st;
@@ -1517,8 +1793,59 @@ function cmdChange() {
   warnStaleServer(p);
 }
 
+function cmdTest() {
+  const p = statePath();
+  const me = whoami();
+
+  // Fixed something and want it looked at again.
+  if (args.retry) {
+    const out = mutate(p, (s) => retryTest(s, String(args.retry), args.note));
+    if (!out.ok) die(out.why);
+    process.stdout.write(`${out.id} back up as ${out.cardId} — attempt ${out.attempt}\n`);
+    warnStaleServer(p);
+    return;
+  }
+
+  // Put the checklist up now, rather than waiting for the last step to settle.
+  if (args.up) {
+    const ids = mutate(p, (s) => mintTests(s));
+    process.stdout.write(ids.length
+      ? `${ids.length} thing${ids.length === 1 ? '' : 's'} to test: ${ids.join(' ')}\n`
+      : 'nothing new to test\n');
+    warnStaleServer(p);
+    return;
+  }
+
+  const src = args.file === '-' || !args.file ? readFileSync(0, 'utf8') : readFileSync(resolve(args.file), 'utf8');
+  let list;
+  try { list = JSON.parse(src); } catch (e) { die(`tests JSON is invalid: ${e.message}`); }
+  if (!Array.isArray(list)) list = [list];
+  const added = mutate(p, (s) => logTests(s, list, me));
+  process.stdout.write(added.length ? `${added.length} to test: ${added.join(' ')}\n` : 'nothing to add\n');
+  // A test nobody can carry out is not a test. Naming the change it covers is
+  // also what lets a failure go straight to the code rather than to a search.
+  for (const t of list) {
+    if (!String(t.how || '').trim()) process.stderr.write(`  no "how": ${t.title}\n`);
+    if (!(t.because || []).length) process.stderr.write(`  no "because": ${t.title}\n`);
+  }
+  warnStaleServer(p);
+}
+
 function cmdReview() {
   const p = statePath();
+  // The checklist comes first here too. The settle path already routes tests
+  // before reviews, but this verb is the hand-operated way in — and a rule that
+  // holds only on the path nobody takes by hand is not the rule the README
+  // states. `--anyway` is the deliberate override, for the case this verb is
+  // actually for: sending an early change up while the build is still running.
+  const held = testsBlocking(load(p));
+  if (held.length && !args.anyway) {
+    const names = held.map((t) => `${t.id} ${t.title}`).join('\n    ');
+    die(`${held.length} thing${held.length === 1 ? '' : 's'} on the checklist ${held.length === 1 ? 'is' : 'are'} not clear yet:\n    ${names}\n` +
+      '  A verdict on code that turns out not to work has to be asked for all over again.\n' +
+      '  Fix what failed and put it back up with `test --retry`, or pass --anyway if this\n' +
+      '  change is genuinely unrelated to what is still outstanding.');
+  }
   const ids = mutate(p, (s) => mintReviews(s));
   const s = load(p);
   process.stdout.write(
@@ -1572,12 +1899,25 @@ function cmdStatus() {
   }
   if (s.build && s.build.steps.length) {
     const done = s.build.steps.filter((x) => x.status === 'done').length;
-    out += `  build: ${done}/${s.build.steps.length} steps\n`;
+    out += s.build.approvedAt
+      ? `  build: ${done}/${s.build.steps.length} steps\n`
+      : `  build: ${s.build.steps.length} steps — NOT STARTED, waiting for them to press Start building\n`;
     for (const st of s.build.steps) {
       const mark = st.status === 'done' ? '✓' : st.status === 'running' ? '◐' : st.status === 'failed' ? '✕' : '·';
       const who = st.owner ? `  ← ${st.owner} (${minutesSince(st.claimedAt)}m)` : st.doneBy ? `  ${st.doneBy}` : '';
       const waits = blockersFor(s.build.steps, st);
       out += `    ${mark} ${st.id} ${st.title}${who}${waits.length && st.status === 'pending' ? `  waits on ${waits.join(',')}` : ''}\n`;
+    }
+  }
+  if ((s.tests || []).length) {
+    const put = s.tests.filter((t) => t.cardId);
+    const passed = put.filter((t) => (resultOf(s, t) || {}).key === 'pass').length;
+    out += `  tests: ${passed}/${put.length || s.tests.length} passing\n`;
+    for (const t of s.tests) {
+      const r = resultOf(s, t);
+      const mark = !t.cardId ? '·' : !r ? '☐' : r.key === 'pass' ? '☑' : r.key === 'fail' ? '☒' : '⊘';
+      out += `    ${mark} ${t.id} ${t.title}${t.attempt > 1 ? ` (attempt ${t.attempt})` : ''}` +
+        `${r && r.key === 'fail' && r.text ? ` — ${r.text.slice(0, 80)}` : ''}\n`;
     }
   }
   if ((s.changes || []).length) {
@@ -1596,7 +1936,7 @@ function cmdExport() {
   if (s.subtitle) lines.push(s.subtitle, '');
   // Review cards are the change log wearing a card, so they are written out
   // under the changes rather than twice.
-  const asked = s.questions.filter((q) => q.kind !== 'review');
+  const asked = s.questions.filter((q) => q.kind !== 'review' && q.kind !== 'test');
   const builtFrom = (qid) => (s.changes || []).filter((c) => (c.because || []).includes(qid));
   const threads = [...new Set(asked.map((q) => q.thread))];
   for (const t of threads) {
@@ -1622,6 +1962,27 @@ function cmdExport() {
       // The forward link. Reading a decision, you can see what it turned into.
       const built = builtFrom(q.id);
       if (built.length) lines.push(`**Built:** ${built.map((c) => `${c.id} — ${c.title}`).join('; ')}`);
+      lines.push('');
+    }
+  }
+  // What was actually tried, and what came back. This is the part of the record
+  // that says the work was USED rather than only agreed to, so a run where two
+  // things failed twice before passing must still read that way afterwards.
+  const put = (s.tests || []).filter((t) => t.cardId);
+  if (put.length) {
+    lines.push('## Tested', '');
+    for (const t of put) {
+      const r = resultOf(s, t);
+      lines.push(`### ${r ? { pass: '☑', fail: '☒', skip: '⊘' }[r.key] || '☐' : '☐'} ${t.title}`, '');
+      if (t.how) lines.push(t.how, '');
+      if (t.expect) lines.push(`**Should happen:** ${t.expect}`, '');
+      lines.push(`**Result:** ${r ? r.label : 'never ticked off'}${t.attempt > 1 ? ` (attempt ${t.attempt})` : ''}`);
+      if (r && r.text) lines.push(`**In their words:** ${r.text}`);
+      for (const prev of t.tries || []) {
+        lines.push(`**Earlier:** ${RESULTS[prev.result] || prev.result}${prev.text ? ` — ${prev.text}` : ''}`);
+      }
+      const covers = (t.because || []).map((id) => (s.changes.find((c) => c.id === id) || {}).title).filter(Boolean);
+      if (covers.length) lines.push(`**Covers:** ${covers.join('; ')}`);
       lines.push('');
     }
   }
@@ -1735,13 +2096,14 @@ async function cmdMcp() {
 const verbs = {
   serve, add: cmdAdd, new: cmdNew, watch: cmdWatch, retire: cmdRetire,
   note: cmdNote, status: cmdStatus, export: cmdExport, mcp: cmdMcp, gateway: cmdGateway,
-  build: cmdBuild, change: cmdChange, review: cmdReview,
+  build: cmdBuild, change: cmdChange, test: cmdTest, review: cmdReview,
   claim: cmdClaim, release: cmdRelease, decisions: cmdDecisions,
 };
 
 if (!cmd || !verbs[cmd]) {
   process.stderr.write(
-    'usage: board.mjs <serve|add|new|watch|retire|note|status|export|mcp|gateway|build|change|review|claim|release|decisions> --state <path>\n' +
+    'usage: board.mjs <serve|add|new|watch|retire|note|status|export|mcp|gateway|build|change|test|review|claim|release|decisions> --state <path>\n' +
+    '       `test` puts a checklist up before the review: --file to author, --retry t3 after a fix\n' +
     '       agents sharing one board pass --as <name> to claim, log and drain independently\n' +
     '       `decisions` is the lead\'s read: what every worker settled, without opening a diff\n'
   );

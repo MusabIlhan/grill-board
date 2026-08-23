@@ -72,6 +72,10 @@ cards  ──→──  that card's choices  ──→──  typing your own
 | <kbd>T</kbd> <kbd>I</kbd> <kbd>V</kbd> | Ask simpler · implications · perspective |
 | <kbd>M</kbd> <kbd>L</kbd> <kbd>P</kbd> | Tell Claude something · light/dark · palette |
 
+**Start building** is the one control with no letter key, on purpose — tab to it
+and press space. A single keystroke that starts a build is the accident the
+button exists to prevent.
+
 Three ways to say **"I can't answer this yet"**, and they ask for different
 things back. **Ask simpler** — too dense as written, so it gets re-said plainly
 or split in two. **Implications** — you can read the options but not their
@@ -100,9 +104,24 @@ choice persists across boards.
 A decision that never becomes code was a conversation, not an agreement. So the
 board doesn't stop when the questions do.
 
-When it drains, the plan goes up first and the header flips to **building** — a
-panel of steps that tick over as they land, each showing which answers it came
-from. The board is never blank while the session works.
+When it drains, the plan goes up first — and stops there. **Nothing is built
+until you press Start building.** The plan is a proposal until then: read it,
+say cut that step, and it comes back rewritten. No command starts it and the
+session is refused if it tries, so you cannot come back to a board and find the
+thing you were about to read already half-built.
+
+```
+Here's the plan — 3 steps                          0/3
+  ·  Split retryable vs terminal in classifyError   q1
+  ·  Backfill the 41 stuck rows      waits on s1    q2
+  ·  Regression test for a 401 in the outbox        q1
+
+  [ Start building ]   Nothing is written until you press this.
+```
+
+Press it and the header flips to **building** — the same panel, steps ticking
+over as they land, each showing which answers it came from. The board is never
+blank while the session works.
 
 It doesn't rely on being told, either. The moment the last card is answered the
 board says so itself — *"nothing left to answer, Claude is reading your
@@ -120,8 +139,38 @@ Building what you decided                          2/4
   ·  Re-test the other two classifyError callers       q3
 ```
 
-Then every change comes back as a card. Not a diff on its own — a diff with
-**the questions that caused it and the answers you gave**, printed above it:
+### First, the things to go and try
+
+A review asks whether the code *reads* right. Whether it *works* is a different
+question, and only one of the two can be answered by looking at a diff. So the
+build hands over a checklist before it hands over any code:
+
+```
+☑  A 401 stops instead of retrying forever          t1
+☒  The dead-letter row keeps its original error     t2   ← doesn't work
+☐  The other two callers still classify the same    t3
+```
+
+Each card says what to do, what should happen, and which change it covers. Three
+answers: **works**, **doesn't work**, or **can't test now** — the last is the
+deliberate way past something you genuinely cannot try, and it doesn't hold
+anything up.
+
+Saying it doesn't work is the useful case. Say what you saw, and that goes
+straight to the session as the thing to fix — no round trip through "what
+happened?", because the button asked for it up front. Once it's fixed the card
+comes back at **attempt 2**, carrying what failed last time so retesting doesn't
+start from scratch.
+
+**A failure holds every review back.** The fix is going to rewrite the change,
+and a verdict given on the version that didn't work would only have to be asked
+for again. Clear the list and the review appears on its own — minted by the tick
+that finished it, not by a session that has to wake up first.
+
+### Then every change comes back as a card
+
+Not a diff on its own — a diff with **the questions that caused it and the
+answers you gave**, printed above it:
 
 > **Because you decided**
 > - **q1** A 4xx retries forever. Fix at the classifier or the queue?
@@ -137,7 +186,9 @@ one click apart in both directions. The same three keys, the same voice client,
 the same board.
 
 `export` then writes the record — every decision, what it produced, every change
-with its diff and its verdict — which is the thing you actually keep.
+with its diff and its verdict, and a **Tested** section covering what was tried
+and what came back, including anything that failed before it passed. That last
+part is what makes the record say the work was *used* rather than only agreed to.
 
 ## Several agents on one build
 
@@ -243,8 +294,8 @@ A zero-dependency Node server and a single HTML page.
 
 ```
 board.mjs      server + CLI (serve, add, new, watch, retire, note, status, export,
-                             build, change, review, claim, release, decisions,
-                             mcp, gateway)
+                             build, change, test, review, claim, release,
+                             decisions, mcp, gateway)
 board.html     the page
 SKILL.md       the instructions Claude follows
 test-build.sh  the build protocol, raced for real

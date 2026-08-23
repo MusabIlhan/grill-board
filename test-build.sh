@@ -20,6 +20,24 @@ ok()  { pass=$((pass+1)); printf '  ok   %s\n' "$1"; }
 bad() { fail=$((fail+1)); printf '  FAIL %s — %s\n' "$1" "$2"; }
 is()  { [ "$2" = "$3" ] && ok "$1" || bad "$1" "want [$3] got [$2]"; }
 
+# Pressing Start building, which is the only way a plan ever starts. There is
+# deliberately no CLI verb for it — a verb an agent can type is a verb an agent
+# will type — so the test does exactly what the page does: POST /api/start.
+# Every plan in this file goes through here, which is itself the assertion that
+# nothing downstream can run without it.
+press() {
+  local st="$1" pt="$2" pid out i
+  node "$B" serve --state "$st" --port "$pt" >/dev/null 2>&1 &
+  pid=$!
+  for i in $(seq 1 40); do
+    curl -sf "http://localhost:$pt/api/state" >/dev/null 2>&1 && break
+    sleep 0.1
+  done
+  out=$(curl -s -X POST "http://localhost:$pt/api/start" -H 'content-type: application/json' -d '{}')
+  kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+  printf '%s' "$out"
+}
+
 cat <<'JSON' | node "$B" add --state "$S" >/dev/null
 [{"title":"Fix at the classifier or the queue?","options":[{"key":"a","label":"Split classifyError"}]},
  {"title":"Repair the 41 rows?","options":[{"key":"a","label":"Backfill"}]},
@@ -34,6 +52,34 @@ cat <<'JSON' | node "$B" build --state "$S" >/dev/null
  {"title":"Regression test","because":["q1"],"needs":["s1"]},
  {"title":"Re-test the callers","because":["q3"],"needs":["s1","s3"]}]
 JSON
+
+# A plan that begins on its own is a plan nobody agreed to. Posting it must put
+# it up and stop there — and "stop" has to mean the work is refused, not merely
+# that the page draws a button, or the rule is decoration an agent walks past.
+echo '== nothing starts until they press the button'
+is "a posted plan is not running" "$(node "$B" status --state "$S" | grep -c '\[planned\]')" "1"
+node "$B" claim --state "$S" --as early >"$ROOT/early.out" 2>&1
+is "a worker that spun up early waits" "$?" "3"
+is "and is told what it is waiting for" "$(grep -c 'press Start building' "$ROOT/early.out")" "1"
+# The other way work starts. `claim` is the front door; moving a step by hand is
+# the side one, and both have to be shut or only the polite path is gated.
+node "$B" build --state "$S" --step s1 --status running >"$ROOT/earlystep.out" 2>&1
+is "a step cannot be moved either" "$?" "1"
+
+# The button opens a window that never existed before: a plan sitting in front of
+# someone who can argue with it. "Cut step 3" has to leave two steps, not five.
+echo '[{"title":"Split classifyError","because":["q1","q3"],"files":["src/classify.ts"]},
+ {"title":"Backfill 41 rows","because":["q2"],"files":["scripts/backfill.ts"]},
+ {"title":"Cap the retry count","because":["q1"],"files":["src/classify.ts"]},
+ {"title":"Regression test","because":["q1"],"needs":["s1"]},
+ {"title":"Re-test the callers","because":["q3"],"needs":["s1","s3"]}]' \
+  | node "$B" build --state "$S" >"$ROOT/repost.out" 2>&1
+is "an unstarted plan can be rewritten" "$(grep -c 'replacing the 5 posted before' "$ROOT/repost.out")" "1"
+is "and does not accumulate steps"      "$(node "$B" status --state "$S" | grep -c '^    · s')" "5"
+
+is "pressing it starts the build" "$(press "$S" "$((PORT + 1))" | grep -c '"ok":true')" "1"
+is "and the board says building"  "$(node "$B" status --state "$S" | grep -c '\[building\]')" "1"
+is "the session is woken to begin" "$(node "$B" new --state "$S" | grep -c '"type": "start"')" "1"
 
 echo '== race: 5 agents, 3 takeable steps'
 for a in w1 w2 w3 w4 w5; do
@@ -110,6 +156,7 @@ echo '== a finished build hands itself back'
 S2="$ROOT/handoff.json"
 echo '[{"title":"Fix it?","options":[{"key":"a","label":"Yes"}]}]' | node "$B" add --state "$S2" >/dev/null
 echo '[{"title":"Do the thing","because":["q1"]}]' | node "$B" build --state "$S2" >/dev/null
+press "$S2" "$((PORT + 3))" >/dev/null
 echo '[{"title":"Did the thing","because":["q1"],"summary":"It is done.","diff":"+ done"}]' \
   | node "$B" change --state "$S2" >/dev/null
 node "$B" build --state "$S2" --step s1 --status done >"$ROOT/last.out" 2>&1
@@ -121,6 +168,7 @@ S4="$ROOT/handback2.json"
 echo '[{"title":"Lemma or surface?","options":[{"key":"a","label":"Lemma"}]}]' | node "$B" add --state "$S4" >/dev/null
 echo '[{"title":"Lexeme identity","because":["q1"]},{"title":"Typecheck","because":["q1"]}]' \
   | node "$B" build --state "$S4" >/dev/null
+press "$S4" "$((PORT + 4))" >/dev/null
 node "$B" claim --state "$S4" --as backfill --step s1 >/dev/null
 # Recording is not finishing: a call made mid-step must be sayable without
 # ending the step, or it gets reconstructed at the end when the reason has faded.
@@ -153,11 +201,68 @@ echo '== a build that logged nothing'
 S3="$ROOT/empty.json"
 echo '[{"title":"Fix it?","options":[{"key":"a","label":"Yes"}]}]' | node "$B" add --state "$S3" >/dev/null
 echo '[{"title":"Do the thing","because":["q1"]}]' | node "$B" build --state "$S3" >/dev/null
+press "$S3" "$((PORT + 5))" >/dev/null
 node "$B" build --state "$S3" --step s1 --status done >"$ROOT/owed.out" 2>&1
 # "Everything reviewed" over a board that was shown no code is worse than the
 # silence it replaces, so this case must NOT flip the phase.
 is "stays in building" "$(node "$B" status --state "$S3" | grep -c '\[building\]')" "1"
 is "and says what it owes" "$(grep -c 'NO change has been logged' "$ROOT/owed.out")" "1"
+
+echo '== the checklist comes before the review'
+S5="$ROOT/testing.json"
+echo '[{"title":"Root?","options":[{"key":"a","label":"Yes"}]}]' | node "$B" add --state "$S5" >/dev/null
+echo '[{"title":"Do it","because":["q1"]}]' | node "$B" build --state "$S5" >/dev/null
+press "$S5" "$((PORT + 6))" >/dev/null
+echo '[{"title":"The change","because":["q1"],"summary":"x","diff":"@@ -1 +1 @@\n-a\n+b"}]' \
+  | node "$B" change --state "$S5" >/dev/null
+printf '%s\n' '[{"title":"Try A","how":"Do A.","expect":"A happens.","because":["c1"]},{"title":"Try B","how":"Do B.","expect":"B happens.","because":["c1"]}]' \
+  | node "$B" test --state "$S5" >/dev/null 2>&1
+node "$B" build --state "$S5" --step s1 --status done >"$ROOT/settle.out" 2>&1
+is "settling puts the checklist up, not the review" "$(grep -c 'things to test' "$ROOT/settle.out")" "1"
+is "the board says testing"  "$(node "$B" status --state "$S5" | grep -c '\[testing\]')" "1"
+# The whole point of testing first: a verdict on code that turns out not to work
+# is a verdict that has to be asked for all over again.
+is "no change is out for review yet" "$(node "$B" status --state "$S5" | grep -c 'not sent for review')" "1"
+
+PT=$((PORT + 2))
+node "$B" serve --state "$S5" --port "$PT" >/dev/null 2>&1 &
+T5=$!; sleep 1
+tick() { curl -s -X POST "http://localhost:$PT/api/answer" -H 'content-type: application/json' -d "$1" >/dev/null; }
+tick '{"id":"q2","keys":["pass"]}'
+tick '{"id":"q3","keys":["fail"],"text":"nothing happened"}'
+# A FAILED test has to HOLD the review back, not merely be recorded. This is the
+# regression that shipped once already: "resolved" counted a failure as done,
+# so one broken thing still sent every change off to be approved.
+is "a failure holds the review"  "$(node "$B" status --state "$S5" | grep -c '\[testing\]')" "1"
+is "and the change stays unsent" "$(node "$B" status --state "$S5" | grep -c 'not sent for review')" "1"
+
+# `review` by hand is the other way into the review, and the rule has to hold on
+# both or the README's promise is only true of the path nobody types.
+node "$B" review --state "$S5" >"$ROOT/early-review.out" 2>&1
+is "review by hand is held too" "$?" "1"
+is "and it names what is outstanding" "$(grep -c 'not clear yet' "$ROOT/early-review.out")" "1"
+
+node "$B" test --state "$S5" --retry t2 --note "the handler was never bound" >/dev/null
+is "the retry reopens the same card" "$(node "$B" status --state "$S5" | grep -c 'attempt 2')" "1"
+is "and it remembers what failed"    "$(curl -s "http://localhost:$PT/api/state" | grep -c 'nothing happened')" "1"
+tick '{"id":"q3","keys":["pass"]}'
+# Minted by the answer itself rather than by the agent draining later — a
+# checklist finished at midnight must not sit there until a session wakes up.
+is "clearing the list releases the review" "$(node "$B" status --state "$S5" | grep -c '\[review\]')" "1"
+is "and the change is out"                 "$(node "$B" status --state "$S5" | grep -c 'awaiting review')" "1"
+kill "$T5" 2>/dev/null; wait "$T5" 2>/dev/null
+
+echo '== a build with nothing to try'
+S6="$ROOT/notests.json"
+echo '[{"title":"Root?","options":[{"key":"a","label":"Yes"}]}]' | node "$B" add --state "$S6" >/dev/null
+echo '[{"title":"Do it","because":["q1"]}]' | node "$B" build --state "$S6" >/dev/null
+press "$S6" "$((PORT + 7))" >/dev/null
+echo '[{"title":"C","because":["q1"],"summary":"x","diff":"@@ -1 +1 @@\n-a\n+b"}]' | node "$B" change --state "$S6" >/dev/null
+node "$B" build --state "$S6" --step s1 --status done >"$ROOT/nt.out" 2>&1
+# Not an error — some builds genuinely have nothing to run by hand — but it is
+# the default you have to argue out of, so it is said rather than passed over.
+is "it says nobody ran it"    "$(grep -c 'no test authored' "$ROOT/nt.out")" "1"
+is "and still reaches review" "$(node "$B" status --state "$S6" | grep -c '\[review\]')" "1"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]

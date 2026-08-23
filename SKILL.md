@@ -25,11 +25,20 @@ seed a batch ──► user answers any card ──► you wake ──► branch
                                 │
                           board drains
                                 ▼
+            post the plan ──► they press Start building
+                                │      (nothing runs until they do)
+                                ▼
               build it, live on the same board
                                 │
                                 ▼
-     every change back as a card, next to the answer that caused it
-                       accept · change the code · reopen the decision
+        a checklist of things to go and try, one card each
+              works · doesn't work · can't test now
+                                │
+              ┌─── doesn't work ─┴─ everything clear ───┐
+              ▼                                         ▼
+      fix it, put it back up               every change back as a card,
+        (attempt 2, carrying                next to the answer that caused it
+         what failed last time)          accept · change the code · reopen it
 ```
 
 You are woken by a `Monitor` event per answer. **Between wakes you end your
@@ -128,9 +137,11 @@ node ~/.claude/skills/grill-board/board.mjs retire --state "$S" --id q7,q9 --rea
 the questions are over. What happens next depends on what the answers describe:
 
 - **Something you can write now** — a fix, a refactor, a feature whose shape is
-  now settled. **Build it.** Do not stop to ask permission: twenty answered
-  questions *were* the permission, and asking again is the blocking move this
-  skill exists to delete. Go to "Past the last question" below.
+  now settled. **Plan it and put the plan up.** Do not stop to ask *whether* to
+  build — twenty answered questions settled that, and asking again in chat is
+  the blocking move this skill exists to delete. Asking *when* is one button on
+  the board, which costs them a click and costs you nothing. Go to "Past the
+  last question" below.
 - **Something you cannot** — a strategy, a spec, a roadmap, work that needs
   people or time you do not have. Then the payoff is the document. Export,
   write up the decisions reached (with who decided — them or you-by-default),
@@ -176,7 +187,31 @@ Two optional fields on a step decide whether the build can be shared:
 expects to touch. Alone you can skip both. With several agents they are the
 difference between parallel and merely simultaneous.
 
-**2. Mark each step as you reach it**, never in a batch at the end. The panel is
+**2. Then stop, and wait to be told to go.** Posting the plan does not start it.
+The board goes to `planned`, draws a **Start building** button under the steps,
+and nothing moves until it is pressed — `claim` refuses, and so does putting a
+step into `running` or `done`.
+
+```
+[start] they pressed Start building — 3 steps approved, begin now
+```
+
+That is the wake you are waiting for. Until it arrives you have nothing to do:
+say the plan is up and end your turn, exactly as you do between answers.
+
+There is no command for this and you must not go looking for one. The whole
+value of the button is that the plan is a **proposal** until a person agrees to
+it — a build they can read before it happens rather than one they catch
+mid-flight. Starting it yourself, by any route, spends the one thing this step
+buys. If they seem not to have seen it, say where it is; do not press it for
+them.
+
+Write the plan expecting to be argued with. It is the last cheap moment: a step
+they would have cut costs a sentence now and a rewrite later. If they send a
+`message` instead of pressing the button, that is the plan being edited — take
+it, re-post with `--file` (which replaces the steps wholesale), and wait again.
+
+**3. Mark each step as you reach it**, never in a batch at the end. The panel is
 the only sign anything is happening.
 
 ```bash
@@ -199,25 +234,105 @@ turn wasted every time.
 node ~/.claude/skills/grill-board/board.mjs change --state "$S" --file /tmp/c1.json
 ```
 
-**4. Hand it back.** Marking the **last** step settled does this for you: the
-changes go up for review and the board flips to `review` in the same write, so a
-finished build cannot end in silence. Run it by hand only to send changes up
-before the build is over.
+**4. Write the checklist — what they have to go and try.** A review asks whether
+the code *reads* right. That is a different question from whether it *works*,
+and only one of the two can be answered by looking at a diff. So before the
+changes go up, the board hands over a list of things to do by hand.
+
+Author it as you build, the same way you log changes — the step that just landed
+is the moment you know what trying it looks like.
 
 ```bash
+node ~/.claude/skills/grill-board/board.mjs test --state "$S" --file /tmp/t.json
+```
+
+```json
+[{
+  "title": "A 401 stops instead of retrying forever",
+  "how": "Point `SYNC_URL` at a bad token and run `npm run sync`. Watch the outbox table.",
+  "expect": "The row lands in dead-letter within one attempt, and the log says `terminal`.",
+  "because": ["c1"]
+}]
+```
+
+- **`how` is the part that has to be right.** It is what they will actually do,
+  in their environment, with their paths. "Test the error handling" is not a
+  test; it is a wish. If it needs a device, a rebuild or a seeded row, say so —
+  a step they discover halfway through is a step that stops them.
+- **`expect` is what makes it decidable.** Without it "does it work" is a matter
+  of opinion, and a thing that half-works gets ticked off.
+- **`because` names the changes it covers**, so a failure goes straight to the
+  code rather than to a search. It is the same idea as a change's `because`.
+- **One thing per card.** A test that checks four behaviours cannot be ticked;
+  it can only be argued with.
+- Cover **what a diff cannot show**: that it runs at all, on their machine, on
+  their data. Do not ask them to re-read the code you already asked them to
+  review — that is what the review card is for.
+
+**5. Hand it back.** Marking the **last** step settled does this for you: the
+checklist goes up and the board flips to `testing` in the same write, so a
+finished build cannot end in silence. Run either by hand only to hand something
+over before the build is over.
+
+```bash
+node ~/.claude/skills/grill-board/board.mjs test --state "$S" --up
 node ~/.claude/skills/grill-board/board.mjs review --state "$S"
 ```
 
-The one case it cannot rescue is a build that logged nothing — there is then
-nothing to review, and rather than claim otherwise the board stays in `building`
-and tells you the changes you owe.
+`review` will refuse while anything on the checklist is outstanding or failed,
+and name what — the same rule the settle path follows, so it holds on the path
+you type as well as the one that happens on its own. `--anyway` overrides it,
+and is for the case the verb exists for: a change that has nothing to do with
+what is still being tried.
+
+**The reviews are minted by the answer that clears the last test**, not by you —
+a checklist finished at midnight must not sit there waiting for a session to
+wake up. A build with no tests authored goes straight to review and says on
+stderr that nobody ran it. That is allowed; some builds have nothing to try by
+hand. It is just never the silent default.
+
+The one case none of this can rescue is a build that logged nothing — there is
+then nothing to review, and rather than claim otherwise the board stays in
+`building` and tells you the changes you owe.
+
+**6. On a test wake** the event says `[test] t3 works — <title>`, or:
+
+```
+[test] t3 FAILED — A 401 stops instead of retrying forever
+    it retried 5 times then gave up, dead-letter table is empty
+```
+
+| result | what you owe them |
+|---|---|
+| `works` | Nothing. |
+| `can't test now` | Nothing. It does not block the review; do not badger them for it. |
+| `doesn't work` | **Fix it.** Then re-log the change under the same `id`, and put the test back up with `--retry`. |
+
+```bash
+node ~/.claude/skills/grill-board/board.mjs test --state "$S" --retry t3 \
+  --note "statusOf() was reading err.status; the client puts it on err.response.status"
+```
+
+The card comes back at attempt 2 carrying what failed last time, so retesting
+never starts from "what was wrong with this again?".
+
+**A failure with no detail is the one case where you must ask before you act.**
+The wake says `(no detail given)` when that happens. Post a card asking what
+they saw — the exact message, where it stopped, what they expected — and fix
+from the answer. Guessing at a repro you were never given is how a `--retry`
+comes back failed a second time, which costs them two rounds of testing to learn
+what one question would have.
+
+**A failed test holds every review back.** That is deliberate: the fix is going
+to rewrite the change, and a verdict given on the version that did not work
+would have to be asked for all over again.
 
 Every logged change becomes a card carrying its summary, its files, **the
 decisions that caused it with the answers they gave**, and the diff. The queue
 cap lifts for the batch: a review is finite and revealing it a few at a time
 leaves them unable to tell whether they have seen the one that matters.
 
-**5. On a review wake** the event says `[review] c3 from q1 — <verdict>`:
+**7. On a review wake** the event says `[review] c3 from q1 — <verdict>`:
 
 | verdict | what you owe them |
 |---|---|
@@ -228,8 +343,10 @@ leaves them unable to tell whether they have seen the one that matters.
 A verdict with free text is the normal case, and the text outranks the button.
 "Looks right, but rename that flag" is a rewrite, not an acceptance.
 
-**6. `[reviewed]` means every change has a verdict.** Export the record and say
-what stands. Offer to commit; do not commit unasked.
+**8. `[reviewed]` means every change has a verdict.** Export the record and say
+what stands — the export carries a **Tested** section with what was tried, what
+came back, and anything that failed before it passed. Offer to commit; do not
+commit unasked.
 
 ## Splitting the build across several agents
 
@@ -243,8 +360,14 @@ the board next to the step it is holding and on every change it writes, and the
 first question you will be asked is "which one is stuck".
 
 **The lead** drains the grill, posts the plan with `needs` and `files` on every
-step, then spawns one subagent per parallel track and stops. It does not claim
-anything itself. Its watch stays unfiltered, so it still sees the whole board.
+step, waits for `[start]`, and only then spawns one subagent per parallel track
+and stops. It does not claim anything itself. Its watch stays unfiltered, so it
+still sees the whole board.
+
+Spawning before the go-ahead is the expensive mistake here: every worker's first
+`claim` comes back exit 3, and a fleet of agents sitting in a wait loop against
+a plan that may yet be rewritten costs real tokens for nothing. Wait for the
+button, then fan out.
 
 **Each worker** runs this loop, and nothing else:
 
@@ -547,10 +670,14 @@ thread ends when the next question would not change what gets built.
 | `note --state P --text T` | set the liveness line shown in the header |
 | `status --state P` | counts, phase, build progress, every change and its verdict |
 | `export --state P [--out F]` | the record: decisions, what each one produced, the build, every change with its diff and verdict |
-| `build --state P --file F` | declare the build; the board flips to `building` and shows the steps. Steps take `needs` and `files` |
+| `build --state P --file F` | post the plan. The board flips to **`planned`** and shows the steps — it does **not** start. Re-posting before it starts replaces the steps, so "cut step 3" is one command. Steps take `needs` and `files` |
+| *(no verb)* | **Starting the build is theirs alone** — the **Start building** button on the board, `POST /api/start`. There is no command and you must not reach for one. Until `[start]` arrives, `claim` and every step move are refused |
 | `build --state P --step s2 --status running\|done\|failed [--note N] [--as W]` | move one step. Only its holder may, unless `--force` |
 | `change --state P --file F [--as W]` | log built changes (JSON array). Re-logging with an existing `id` rewrites it and reopens its review |
-| `review --state P` | turn every unreviewed change into a card, with its decisions attached |
+| `test --state P --file F [--as W]` | author the checklist (JSON array): `title`, `how`, `expect`, `because`. Warns on a test with no `how` or no `because` |
+| `test --state P --up` | put the checklist up now, without waiting for the last step to settle |
+| `test --state P --retry t3 [--note N]` | after a fix: the card reopens at attempt 2 carrying what failed last time |
+| `review --state P [--anyway]` | turn every unreviewed change into a card, with its decisions attached. Happens on its own once the checklist is clear; refuses while anything on it is outstanding or failed, which `--anyway` overrides |
 | `claim --state P --as W [--step s3] [--steal s3]` | take one step, exclusively. Exit 3 = wait, exit 0 with no step = the build is done |
 | `release --state P --as W [--step s3] [--failed] [--reason R]` | hand a step back |
 | `build --state P --step s8 --decided "..." [--decided "..."] [--flag "..."]` | record a call you made. Repeatable; with no `--status` the step does not move |
