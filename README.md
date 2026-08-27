@@ -53,6 +53,13 @@ Three things make it different from a chat prompt:
 ## Install
 
 ```bash
+npx skills add MusabIlhan/grill-board
+```
+
+It asks which agent and whether to install globally or just here. Or clone it
+straight in, which is the same thing without the questions:
+
+```bash
 git clone https://github.com/MusabIlhan/grill-board.git ~/.claude/skills/grill-board
 ```
 
