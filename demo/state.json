@@ -1,0 +1,1883 @@
+{
+ "api": 4,
+ "boardId": "demo",
+ "prefs": {},
+ "title": "Shipping grill-board",
+ "subtitle": "What has to be true before this goes public",
+ "agentNote": "regenerating from the finished board",
+ "agentNoteAt": "2026-08-27T12:32:56.014Z",
+ "maxOpen": 30,
+ "phase": "review",
+ "build": {
+  "startedAt": "2026-08-27T10:29:56.203Z",
+  "finishedAt": "2026-08-27T12:30:59.424Z",
+  "steps": [
+   {
+    "id": "s1",
+    "title": "MIT LICENCE file, and the README's Licence section says so",
+    "because": [
+     "q2"
+    ],
+    "needs": [],
+    "files": [
+     "LICENSE",
+     "README.md"
+    ],
+    "status": "done",
+    "note": "MIT, 2026 Musab Ilhan",
+    "at": "2026-08-27T10:31:30.862Z",
+    "owner": null,
+    "claimedAt": null,
+    "doneBy": "s-6f61b4"
+   },
+   {
+    "id": "s2",
+    "title": "serve auto-mints a token whenever it binds past loopback",
+    "because": [
+     "q5"
+    ],
+    "needs": [],
+    "files": [
+     "board.mjs"
+    ],
+    "status": "done",
+    "note": "401 without, 200 with, survives restart",
+    "at": "2026-08-27T10:38:13.827Z",
+    "owner": null,
+    "claimedAt": null,
+    "decided": [
+     {
+      "by": "s-6f61b4",
+      "at": "2026-08-27T10:38:13.722Z",
+      "text": "Explicit flags beat the inference — --no-token, then --token X, then --token, then the bind check. A rule that could not be overridden would strand anyone on a trusted LAN"
+     },
+     {
+      "by": "s-6f61b4",
+      "at": "2026-08-27T10:38:13.722Z",
+      "text": "Kept the token PERSISTED on the board rather than minting per start, so restarting does not invalidate a phone link — verified by restarting and diffing the token"
+     }
+    ],
+    "flags": [
+     {
+      "by": "s-6f61b4",
+      "at": "2026-08-27T10:38:13.722Z",
+      "text": "This changes the URL for anyone who restarts an existing untokened board. Nothing warns them on upgrade; their old shared link 401s until re-copied"
+     }
+    ],
+    "doneBy": "s-6f61b4"
+   },
+   {
+    "id": "s3",
+    "title": "gateway always mints a token; --no-token is the way out",
+    "because": [
+     "q14"
+    ],
+    "needs": [
+     "s2"
+    ],
+    "files": [
+     "board.mjs"
+    ],
+    "status": "done",
+    "note": "401s untokened, --no-token warns, persists",
+    "at": "2026-08-27T10:40:48.933Z",
+    "owner": null,
+    "claimedAt": null,
+    "decided": [
+     {
+      "by": "s-6f61b4",
+      "at": "2026-08-27T10:40:48.838Z",
+      "text": "Unconditional rather than the bind rule — the gateway's purpose IS remote reach, so asking the bind address is asking a question it cannot answer"
+     }
+    ],
+    "flags": [
+     {
+      "by": "s-6f61b4",
+      "at": "2026-08-27T10:40:48.838Z",
+      "text": "An already-registered connector against an untokened gateway will 401 after upgrade. Nothing migrates it; they re-register with the printed token"
+     }
+    ],
+    "doneBy": "s-6f61b4"
+   },
+   {
+    "id": "s4",
+    "title": "Node version check at the top of board.mjs, so an old Node is a sentence not a stack trace",
+    "because": [
+     "q10"
+    ],
+    "needs": [
+     "s3"
+    ],
+    "files": [
+     "board.mjs"
+    ],
+    "status": "done",
+    "note": "runs on 22, exits 1 forced to 16",
+    "at": "2026-08-27T10:42:08.698Z",
+    "owner": null,
+    "claimedAt": null,
+    "decided": [
+     {
+      "by": "s-6f61b4",
+      "at": "2026-08-27T10:42:08.541Z",
+      "text": "Verified the floor rather than trusting the README — no .at, findLast, Object.hasOwn, structuredClone or AbortSignal anywhere, so 18 is honest"
+     },
+     {
+      "by": "s-6f61b4",
+      "at": "2026-08-27T10:42:08.541Z",
+      "text": "No package.json engines field: there is no package.json, and adding one to a zero-dependency skill invites npm install into something that does not need it"
+     }
+    ],
+    "flags": [
+     {
+      "by": "s-6f61b4",
+      "at": "2026-08-27T10:42:08.541Z",
+      "text": "The check cannot catch a SYNTAX error — imports resolve before it runs. If a future edit uses newer syntax, old Node dies before line 28 and this is useless"
+     }
+    ],
+    "doneBy": "s-6f61b4"
+   },
+   {
+    "id": "s5",
+    "title": "test-build.sh covers the new token defaults and stays green",
+    "because": [
+     "q5",
+     "q14",
+     "q10"
+    ],
+    "needs": [
+     "s4"
+    ],
+    "files": [
+     "test-build.sh"
+    ],
+    "status": "done",
+    "note": "57 -> 70 checks, all green",
+    "at": "2026-08-27T10:47:00.040Z",
+    "owner": null,
+    "claimedAt": null,
+    "decided": [
+     {
+      "by": "s-6f61b4",
+      "at": "2026-08-27T10:46:59.966Z",
+      "text": "Test servers bind 127.0.0.1 rather than threading tokens through every curl — they never needed the LAN, and it also stops the suite triggering a firewall prompt on a stranger's first run"
+     },
+     {
+      "by": "s-6f61b4",
+      "at": "2026-08-27T10:46:59.966Z",
+      "text": "Pinned the rule with 13 new checks instead of just unbreaking the old ones; the restart-keeps-the-token case is the one that matters, since a rotating token would break the phone link it protects"
+     }
+    ],
+    "doneBy": "s-6f61b4"
+   },
+   {
+    "id": "s6",
+    "title": "README: problem-led opening, pitch on top, reference below, and an \"If it doesn't work\" section",
+    "because": [
+     "q8",
+     "q9",
+     "q10"
+    ],
+    "needs": [
+     "s1"
+    ],
+    "files": [
+     "README.md"
+    ],
+    "status": "done",
+    "note": "problem-led opening, reference below, troubleshooting added",
+    "at": "2026-08-27T10:52:39.350Z",
+    "owner": null,
+    "claimedAt": null,
+    "decided": [
+     {
+      "by": "s-6f61b4",
+      "at": "2026-08-27T10:52:39.283Z",
+      "text": "Moved sections rather than trimming any — q8 said 'keeps every word you wrote, changes what the first screen is for', so deletion was not mine to do"
+     },
+     {
+      "by": "s-6f61b4",
+      "at": "2026-08-27T10:52:39.283Z",
+      "text": "Kept grill-me as a linked blockquote rather than dropping it (q9's third option) — the credit and the shorthand are worth one line to the readers it lands with"
+     }
+    ],
+    "flags": [
+     {
+      "by": "s-6f61b4",
+      "at": "2026-08-27T10:52:39.283Z",
+      "text": "README went 326 -> 358 lines. Order is right, length is not smaller; if it still reads long the fix is deletion and I did none"
+     }
+    ],
+    "doneBy": "s-6f61b4"
+   },
+   {
+    "id": "s7",
+    "title": "Read-only demo — a fetch shim over the real board.html, on an authored whole-arc board",
+    "because": [
+     "q4",
+     "q7",
+     "q13"
+    ],
+    "needs": [],
+    "files": [
+     "demo/index.html",
+     "demo/demo.js",
+     "demo/state.json"
+    ],
+    "status": "done",
+    "note": "static-served, 16 cards + 8 steps, 75 checks green",
+    "at": "2026-08-27T12:23:49.037Z",
+    "owner": null,
+    "claimedAt": null,
+    "decided": [
+     {
+      "by": "s-6f61b4",
+      "at": "2026-08-27T12:23:48.978Z",
+      "text": "Generated, not forked. build.mjs injects into the real board.html and --check fails the suite when the committed output drifts — you have already been bitten by a stale copy of this page and that failure mode had no warning attached"
+     },
+     {
+      "by": "s-6f61b4",
+      "at": "2026-08-27T12:23:48.978Z",
+      "text": "Writes are accepted-and-dropped rather than blocked, because the page renders optimistically and a frozen rev means a click STICKS. Inert buttons would have read as broken; this reads as a snapshot, and the ribbon says so"
+     },
+     {
+      "by": "s-6f61b4",
+      "at": "2026-08-27T12:23:48.978Z",
+      "text": "trim.mjs emits the /api/state payload rather than the raw state file — the page only knows that shape, and the raw file would have rendered almost right, which is worse than failing"
+     }
+    ],
+    "flags": [
+     {
+      "by": "s-6f61b4",
+      "at": "2026-08-27T12:23:48.978Z",
+      "text": "The demo state stops at 'building' — the checklist and reviews q13 asked for do not exist yet because this build is what makes them. Re-run trim.mjs against this board after review, or it ships showing two thirds of the arc"
+     }
+    ],
+    "doneBy": "s-6f61b4"
+   },
+   {
+    "id": "s8",
+    "title": "GIF of a real grill, embedded at the top of the README",
+    "because": [
+     "q12"
+    ],
+    "needs": [
+     "s6",
+     "s7"
+    ],
+    "files": [
+     "README.md",
+     "docs/grill-board.gif"
+    ],
+    "status": "done",
+    "note": "11s, 1.0 MB, embedded",
+    "at": "2026-08-27T12:30:59.424Z",
+    "owner": null,
+    "claimedAt": null,
+    "decided": [
+     {
+      "by": "s-6f61b4",
+      "at": "2026-08-27T12:30:59.169Z",
+      "text": "Replayed a real board instead of screen-recording one — headless Chrome over generated frames is deterministic, regenerable, and needed no screen capture. It also means every word in the GIF was really written and really answered"
+     },
+     {
+      "by": "s-6f61b4",
+      "at": "2026-08-27T12:30:59.169Z",
+      "text": "Frames render through build.mjs's render(), not a second renderer, so the GIF and the demo cannot disagree about what the page looks like"
+     }
+    ],
+    "flags": [
+     {
+      "by": "s-6f61b4",
+      "at": "2026-08-27T12:30:59.169Z",
+      "text": "The capture loop is in my shell, not in the repo. 'How do I regenerate the GIF' is answered by the change entry and nowhere else — it wants a demo/reel.sh"
+     },
+     {
+      "by": "s-6f61b4",
+      "at": "2026-08-27T12:30:59.169Z",
+      "text": "The README's demo link points at musabilhan.github.io/grill-board/demo/, which does not exist until GitHub Pages is switched on for the repo, serving from main branch root"
+     }
+    ],
+    "doneBy": "s-6f61b4"
+   }
+  ],
+  "approvedAt": "2026-08-27T10:29:56.203Z"
+ },
+ "changes": [
+  {
+   "id": "c1",
+   "title": "MIT licence, and the README says what \"no promises\" means",
+   "because": [
+    "q2"
+   ],
+   "files": [
+    "LICENSE",
+    "README.md:324-332"
+   ],
+   "reviewId": "q23",
+   "rev": 1,
+   "step": null,
+   "author": "s-6f61b4",
+   "at": "2026-08-27T10:31:30.783Z"
+  },
+  {
+   "id": "c2",
+   "title": "serve mints a token whenever it binds past loopback",
+   "because": [
+    "q5"
+   ],
+   "files": [
+    "board.mjs:1234-1258",
+    "board.mjs:1300-1310"
+   ],
+   "reviewId": "q24",
+   "rev": 1,
+   "step": null,
+   "author": "s-6f61b4",
+   "at": "2026-08-27T10:38:13.568Z"
+  },
+  {
+   "id": "c3",
+   "title": "The gateway always mints a token, because a tunnel is invisible to a bind check",
+   "because": [
+    "q14"
+   ],
+   "files": [
+    "board.mjs:2062-2082"
+   ],
+   "reviewId": "q25",
+   "rev": 1,
+   "step": null,
+   "author": "s-6f61b4",
+   "at": "2026-08-27T10:40:48.727Z"
+  },
+  {
+   "id": "c4",
+   "title": "An old Node is now a sentence, not a stack trace",
+   "because": [
+    "q10"
+   ],
+   "files": [
+    "board.mjs:28-44"
+   ],
+   "reviewId": "q26",
+   "rev": 1,
+   "step": null,
+   "author": "s-6f61b4",
+   "at": "2026-08-27T10:42:08.414Z"
+  },
+  {
+   "id": "c5",
+   "title": "The suite covers the token rule, and stops putting itself on the network",
+   "because": [
+    "q5",
+    "q14",
+    "q10"
+   ],
+   "files": [
+    "test-build.sh:30",
+    "test-build.sh:128",
+    "test-build.sh:228",
+    "test-build.sh:270-330"
+   ],
+   "reviewId": "q27",
+   "rev": 1,
+   "step": null,
+   "author": "s-6f61b4",
+   "at": "2026-08-27T10:46:59.872Z"
+  },
+  {
+   "id": "c6",
+   "title": "The README leads with the problem, and the reference moves below the fold",
+   "because": [
+    "q8",
+    "q9",
+    "q10"
+   ],
+   "files": [
+    "README.md:1-45",
+    "README.md:60-64",
+    "README.md:255-300"
+   ],
+   "reviewId": "q28",
+   "rev": 1,
+   "step": null,
+   "author": "s-6f61b4",
+   "at": "2026-08-27T10:52:39.231Z"
+  },
+  {
+   "id": "c7",
+   "title": "A static demo that is the real board.html, not a copy of it",
+   "because": [
+    "q4",
+    "q7",
+    "q13"
+   ],
+   "files": [
+    "demo/build.mjs",
+    "demo/trim.mjs",
+    "demo/shim.js",
+    "demo/style.css",
+    "demo/index.html",
+    "test-build.sh:330-345"
+   ],
+   "reviewId": "q29",
+   "rev": 1,
+   "step": null,
+   "author": "s-6f61b4",
+   "at": "2026-08-27T12:23:48.910Z"
+  },
+  {
+   "id": "c8",
+   "title": "A GIF that replays a real board, generated rather than recorded",
+   "because": [
+    "q12"
+   ],
+   "files": [
+    "docs/grill-board.gif",
+    "demo/reel.mjs",
+    "demo/build.mjs:30-48",
+    "demo/shim.js:34",
+    "README.md:12-18",
+    ".gitignore:5-10"
+   ],
+   "reviewId": "q30",
+   "rev": 1,
+   "step": null,
+   "author": "s-6f61b4",
+   "at": "2026-08-27T12:30:59.047Z"
+  }
+ ],
+ "workers": {
+  "s-6f61b4": {
+   "firstSeen": "2026-08-27T10:30:30.486Z",
+   "note": "",
+   "lastSeen": "2026-08-27T12:30:59.423Z"
+  }
+ },
+ "rev": 1,
+ "questions": [
+  {
+   "id": "q1",
+   "parentId": null,
+   "depth": 0,
+   "thread": "Scope",
+   "title": "What does \"public\" mean here — a repo people clone, or a plugin they install?",
+   "spoken": "First thing: how do you picture someone actually getting this? Today the readme says clone it into your skills folder. There's also the Claude Code plugin marketplace, where installing is one command and updates arrive on their own. Which of those is the front door?",
+   "spokenDetail": "",
+   "kind": "question",
+   "changeId": null,
+   "testId": null,
+   "context": "The README today says:\n\n```bash\ngit clone https://github.com/MusabIlhan/grill-board.git ~/.claude/skills/grill-board\n```\n\nThat works, and it is what `/grill-me` does too. But it makes **you** the update mechanism: nobody who cloned in August finds out that the Start-building button exists.\n\n| | clone into `~/.claude/skills` | plugin marketplace | npm package |\n|---|---|---|---|\n| install | one `git clone` | `/plugin install` | `npx grill-board` |\n| updates | they `git pull`, if they remember | handled | `npx` is always latest |\n| needs | nothing | a `.claude-plugin/marketplace.json` + repo layout | a publish pipeline, a name nobody owns |\n| discoverable | only if you link it | listed | npm search |\n| the skill itself | already correct | paths inside SKILL.md hardcode `~/.claude/skills/grill-board` — those break | same problem, worse |\n\nThe path question is the sharp edge: every command in SKILL.md is written as `node ~/.claude/skills/grill-board/board.mjs`. Under a plugin that directory is `~/.claude/plugins/…/grill-board`, so the skill has to resolve its own location instead of hardcoding it. That is a real change, not a docs edit.",
+   "recommendation": "Clone, and say so plainly — same front door as /grill-me, zero new machinery, and the thing you are shipping is a skill people read before they trust. A marketplace entry is the right second move once someone other than you has run it.",
+   "options": [
+    {
+     "key": "a",
+     "label": "Clone into ~/.claude/skills, like grill-me",
+     "detail": "Ships today. No update path — you'd be pushing tags and hoping people pull.",
+     "recommended": true
+    },
+    {
+     "key": "b",
+     "label": "Claude Code plugin marketplace",
+     "detail": "Real installs and real updates. Costs: repo restructure, self-locating paths in SKILL.md, and a manifest to keep right.",
+     "recommended": false
+    },
+    {
+     "key": "c",
+     "label": "Both — clone now, plugin as v2",
+     "detail": "Honest, but the second half is the one that never happens unless you date it.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T09:03:11.731Z",
+   "openedAt": "2026-08-27T09:03:11.732Z",
+   "answer": {
+    "keys": [
+     "a"
+    ],
+    "text": null,
+    "at": "2026-08-27T09:06:06.042Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q2",
+   "parentId": null,
+   "depth": 0,
+   "thread": "Scope",
+   "title": "What are you actually signing up for once strangers have it?",
+   "spoken": "Second: what do you owe people afterwards? There's a version where this is a thing you built and put up, take it or leave it. And a version where you answer issues and take pull requests. Those need different files in the repo, and it's much easier to say which one you are up front than to walk it back later.",
+   "spokenDetail": "",
+   "kind": "question",
+   "changeId": null,
+   "testId": null,
+   "context": "This decides several files at once, so it is worth settling before the polish work rather than after.\n\n| | \"here it is\" | maintained |\n|---|---|---|\n| LICENCE | still needed — **no licence means nobody may legally use it** | same |\n| README tone | \"I built this for me\" | \"contributions welcome\" |\n| issues | off, or a note saying they go unanswered | on, with a template |\n| PRs | a line saying you probably won't merge them | CONTRIBUTING.md, a test command that works on someone else's machine |\n| breaking changes | free | you owe a CHANGELOG |\n| the state file format | free to change | people have boards in flight |\n\nThe repo is **private with no licence today**. That one is not optional in any version — \"no licence\" is the default-deny state, so a public repo with no LICENCE file is one nobody may legally copy, and putting it off means the first ten people who find it can't use it.",
+   "recommendation": "\"Here it is\", MIT, issues on but expectations set in the README. It costs one file and one paragraph, and it does not commit your evenings to a tool you built for yourself.",
+   "options": [
+    {
+     "key": "a",
+     "label": "\"Here it is\" — MIT, no promises",
+     "detail": "One LICENCE file, one honest README line. You can upgrade later; you cannot downgrade.",
+     "recommended": true
+    },
+    {
+     "key": "b",
+     "label": "Properly maintained",
+     "detail": "CONTRIBUTING, issue templates, a CHANGELOG, and a test suite that passes on a machine that is not yours.",
+     "recommended": false
+    },
+    {
+     "key": "c",
+     "label": "Archive it read-only",
+     "detail": "Public to read, issues and PRs off. Least work, and it says 'do not build on this'.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T09:03:11.732Z",
+   "openedAt": "2026-08-27T09:03:11.732Z",
+   "answer": {
+    "keys": [
+     "a"
+    ],
+    "text": null,
+    "at": "2026-08-27T09:06:16.705Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q3",
+   "parentId": null,
+   "depth": 0,
+   "thread": "Scope",
+   "title": "What is the bar for v1 — does it work, or does it land?",
+   "spoken": "Third, and this one shapes everything else: what has to be true before you press publish? There's a low bar — a stranger clones it and it works on their machine. And a high one — someone sees the page and understands in thirty seconds why they'd want it. They need completely different work, and one of them is mostly writing rather than code.",
+   "spokenDetail": "",
+   "kind": "question",
+   "changeId": null,
+   "testId": null,
+   "context": "Same repo, two very different piles of work.\n\n**\"It works\"** — the failure modes a stranger hits that you never will:\n- Node version floor (you are on whatever your Mac has; the README says 18+ — is that tested?)\n- The board writes to `~/.claude/grill-board/…`, which assumes a `~/.claude` exists\n- `test-build.sh` binds real ports from 7896 and shells out to `curl`; on a machine with a busy port or no curl it fails and looks like the tool is broken\n- Ports 7800+ and the `0.0.0.0` bind — a corporate laptop firewall prompt on first run is a bad first impression\n- Nothing has ever run on Linux or Windows/WSL\n\n**\"It lands\"** — the repo as an argument:\n- The README already reads well, but there is **not a single screenshot or GIF** of the actual board. A tool whose whole pitch is a page you look at, shown only as ASCII art.\n- No demo anyone can try without installing\n- `/grill-me` gets to say \"it's like being interviewed\"; grill-board has to explain a board, a build panel, a checklist and a review in one screen of text\n\nThey are not mutually exclusive — but they compete for the next day of work, and whichever you name is where it goes.",
+   "recommendation": "\"It lands.\" A stranger who cannot tell what this is never gets far enough to hit a portability bug — and the one thing missing is the cheapest to fix: a picture of the board.",
+   "options": [
+    {
+     "key": "a",
+     "label": "It lands — the page has to sell it",
+     "detail": "Screenshots or a GIF of a real board, a tightened README opening. Mostly writing and a screen recording.",
+     "recommended": true
+    },
+    {
+     "key": "b",
+     "label": "It works — portability first",
+     "detail": "Node floor, a clean-machine run, Linux, no-curl fallback in the tests. Invisible if nobody clones it.",
+     "recommended": false
+    },
+    {
+     "key": "c",
+     "label": "Both, and it slips a week",
+     "detail": "The honest answer if you want it to survive contact. Say so and I will plan it as two phases.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T09:03:11.732Z",
+   "openedAt": "2026-08-27T09:03:11.732Z",
+   "answer": {
+    "keys": [
+     "a"
+    ],
+    "text": null,
+    "at": "2026-08-27T09:06:43.297Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q4",
+   "parentId": null,
+   "depth": 0,
+   "thread": "The page",
+   "title": "You said it has to land. So what does a stranger actually SEE?",
+   "spoken": "You picked \"it lands\", so here's the sharpest version of that. Right now there is not one picture of the board anywhere in the readme — a tool whose whole pitch is a page you look at, shown only as ascii art. Four ways to fix that, and they cost very different amounts. Do you want static screenshots, an animated gif of a real grill, or a live demo page people can click?",
+   "spokenDetail": "",
+   "kind": "question",
+   "changeId": null,
+   "testId": null,
+   "context": "The README is 326 lines and genuinely well written, and it contains **zero images**. Every illustration is ASCII:\n\n```\nBuilding what you decided                          2/4\n  ✓  Split retryable vs terminal in classifyError   q1 q3\n```\n\nThat is charming in a terminal README and it is *not* what the thing looks like. The board has eight palettes, a card layout, a word-level diff, a build panel and a checklist — and a reader has to take all of it on faith.\n\n| | what it costs | what it proves |\n|---|---|---|\n| **Static screenshots** (3–4 PNGs) | ~30 min: run a real grill, screenshot card / build panel / diff / checklist | what it looks like |\n| **Animated GIF** | ~1–2 h: script a run, record, trim, keep it under GitHub's 10 MB inline limit | that it is *live* — cards appearing while you answer is the whole idea and a still cannot show it |\n| **Live demo on GitHub Pages** | unknown, see below | that it is real, and it is clickable from the README |\n| **asciinema of the CLI side** | ~30 min | the wrong half — nobody cares what the CLI prints |\n\nOn the live demo: `board.html` is a single self-contained file, but it is **not** static-ready. It polls `GET /api/state` every 400–2500 ms and POSTs to `/api/answer`, `/api/ask`, `/api/message`, `/api/prefs`, `/api/start`. A Pages demo needs those six intercepted against a canned state — a small shim, but I have not written or measured it, so treat \"cheap\" as unverified.\n\nThe honest ranking is: **a GIF is the one that carries the idea**, because \"you are never blocked\" is a claim about *time*, and a still image cannot make it.",
+   "recommendation": "GIF at the top, then two or three stills further down for the build panel and the diff. Skip the live demo for v1 — it is the only option here with an unknown number attached, and it is trying to prove something the GIF already proves.",
+   "options": [
+    {
+     "key": "a",
+     "label": "One GIF up top + a few stills below",
+     "detail": "Shows the live-ness, which is the actual claim. Half a day, mostly recording and trimming.",
+     "recommended": true
+    },
+    {
+     "key": "b",
+     "label": "Stills only",
+     "detail": "Half an hour, and the README stops lying by omission. Does not show that cards arrive while you answer.",
+     "recommended": false
+    },
+    {
+     "key": "c",
+     "label": "Live clickable demo on GitHub Pages",
+     "detail": "Strongest proof, unknown cost, and a second copy of board.html to keep in sync.",
+     "recommended": false
+    },
+    {
+     "key": "d",
+     "label": "Ship with no images",
+     "detail": "It reads well enough to survive. I think this is wrong for a tool that is literally a screen.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T09:09:02.098Z",
+   "openedAt": "2026-08-27T09:09:02.099Z",
+   "answer": {
+    "keys": [
+     "c"
+    ],
+    "text": null,
+    "at": "2026-08-27T09:09:25.935Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q5",
+   "parentId": null,
+   "depth": 0,
+   "thread": "Trust",
+   "title": "The board binds to 0.0.0.0 with no password. Is that OK to hand a stranger?",
+   "spoken": "Here's the one I'd want you to look at hardest before it goes public. By default the board listens on every network interface, and by default there's no token — so anyone on the same wifi can read your plan and, worse, answer your questions. On your home network that's the feature that lets you answer from your phone. On café wifi handed to someone who never read that line, it's a leak.",
+   "spokenDetail": "",
+   "kind": "question",
+   "changeId": null,
+   "testId": null,
+   "context": "```js\n// board.mjs:1264\nconst host = args.host || '0.0.0.0';\n```\n\nand `--token` is **opt-in**. So the default run is: readable *and writable* by anything that can reach port 7800+.\n\nThe README does say so — but in the voice-mode section, ~250 lines down:\n\n> **`--token` is not optional once the board leaves your machine.**\n\nThat is a warning for the person who has read the whole page. The person who runs `/grill-board` on day one has read the first screen.\n\nWhat is actually at stake: the state file holds the plan, the code in the cards, the diffs of changes, and every answer. Writable means someone else can answer a card, which the session then acts on — that is not just a privacy leak, it is an **injection path into what gets built**.\n\n| | keep `0.0.0.0`, no token | `127.0.0.1` default, `--lan` opts in | `0.0.0.0` but auto-mint a token |\n|---|---|---|---|\n| phone answering | works out of the box | one extra flag, discovered by reading | works, URL carries `?t=…` |\n| café wifi | exposed | safe | readable only with the URL |\n| breaks today's behaviour | no | yes — the LAN URL stops working unless asked for | no |\n| README has to explain | the risk | the flag | nothing |\n\nThe third one is interesting: the URL file already prints a LAN address, and it could simply print it *with the token in it*. Cost is roughly \"default `--token` on when host is not loopback\".",
+   "recommendation": "Auto-mint a token whenever the bind is not loopback. It keeps the phone feature working with no new flag to learn, it makes the insecure-by-default state impossible to reach by accident, and the URL file already exists to carry it.",
+   "options": [
+    {
+     "key": "a",
+     "label": "Auto-token whenever it binds beyond loopback",
+     "detail": "Phone still works, URL carries ?t=. Nothing to learn, nothing to break.",
+     "recommended": true
+    },
+    {
+     "key": "b",
+     "label": "Default to 127.0.0.1, --lan to open it",
+     "detail": "Safest and simplest to explain. Breaks the phone flow for anyone who does not read.",
+     "recommended": false
+    },
+    {
+     "key": "c",
+     "label": "Leave it, move the warning to the top of the README",
+     "detail": "Zero code. Relies on strangers reading a warning, which is the assumption that fails.",
+     "recommended": false
+    },
+    {
+     "key": "d",
+     "label": "Auto-token AND loopback default",
+     "detail": "Belt and braces. Two behaviour changes at once for a tool nobody has complained about yet.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T09:09:02.099Z",
+   "openedAt": "2026-08-27T09:09:02.099Z",
+   "answer": {
+    "keys": [
+     "a"
+    ],
+    "text": null,
+    "at": "2026-08-27T10:19:44.962Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q6",
+   "parentId": null,
+   "depth": 0,
+   "thread": "The skill",
+   "title": "SKILL.md is 685 lines. Every invocation pays for it. Does it get split?",
+   "spoken": "Last one for now, and it's about a cost that's invisible to you but not to the people who install it. Grill-me is ten lines. Grill-board's instructions are six hundred and eighty five, about forty kilobytes, and Claude loads the whole thing every single time the skill runs — including the parts about splitting a build across several agents, which most runs never touch. Is that fine, or does it need to be a short core with the rest loaded on demand?",
+   "spokenDetail": "",
+   "kind": "question",
+   "changeId": null,
+   "testId": null,
+   "context": "Measured just now:\n\n| | lines | bytes |\n|---|---|---|\n| `grill-me/SKILL.md` | 10 | 635 |\n| `grill-board/SKILL.md` | **685** | **39,614** |\n\nAbout 10k tokens on **every** invocation, before a single question is written. Roughly a third of it is the multi-agent section, which a solo grill never uses, and the change-entry and card-writing examples, which only matter past the drain.\n\nThis is not only about cost. A long skill file is also a **quality** question in both directions: more instruction means more of it is followed, and also more of it competes for attention. You have tuned this one against your own runs; you genuinely do not know how it behaves for someone whose first grill is a Django app.\n\nThe split, if you did one, is natural — SKILL.md keeps the loop and the card rules, and points to files loaded only when reached:\n\n```\nSKILL.md          the loop, card writing, the rules      (~250 lines)\nBUILDING.md       plan → start → build → test → review   (~200)\nFANNING-OUT.md    claim, --decided, per-agent cursors    (~150)\n```\n\nThe cost is real: a skill that references sibling files depends on Claude actually going and reading them at the right moment, and **that is exactly the failure this tool's own build phase exists to prevent** — a step that gets skipped is invisible until the output is wrong.",
+   "recommendation": "Leave it whole for v1. It is long because it is doing something long, splitting it introduces a new way to fail silently, and 10k tokens is not what will stop anyone using this. Revisit if someone reports the build phase going off the rails.",
+   "options": [
+    {
+     "key": "a",
+     "label": "Leave it whole",
+     "detail": "Zero risk, zero work. Costs ~10k tokens a run, which nobody has complained about.",
+     "recommended": true
+    },
+    {
+     "key": "b",
+     "label": "Split into core + two loaded-on-demand files",
+     "detail": "Cheaper runs and a more readable skill. Adds a silent failure mode: the file that never gets read.",
+     "recommended": false
+    },
+    {
+     "key": "c",
+     "label": "Trim it instead — cut 200 lines of prose",
+     "detail": "Keeps one file. Every line you cut is a rule you decided you did not need, which is a real edit, not a formatting pass.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T09:09:02.099Z",
+   "openedAt": "2026-08-27T09:09:02.099Z",
+   "answer": {
+    "keys": [
+     "b"
+    ],
+    "text": null,
+    "at": "2026-08-27T10:20:43.918Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q7",
+   "parentId": "q4",
+   "depth": 1,
+   "thread": "The page",
+   "title": "On the demo — can they answer a card, or only look at one?",
+   "spoken": "You picked the live demo, so here's the fork that decides how much work it is. A demo where you can only look is basically a screenshot with extra steps. A demo where you can actually answer a card and watch the next one appear is the entire pitch, working, in someone's browser before they install anything. The second one means faking six endpoints against a state that lives in the page.",
+   "spokenDetail": "",
+   "kind": "question",
+   "changeId": null,
+   "testId": null,
+   "context": "The page is one self-contained file, but it talks to a server on six routes:\n\n```\nGET  /api/state     polled every 400–2500ms — this is how cards appear\nPOST /api/answer    /api/ask  /api/message  /api/prefs  /api/start\n```\n\nA static host has none of those. So the demo needs a shim that answers all six from memory. What differs is how much it has to fake.\n\n| | read-only | answerable | scripted playback |\n|---|---|---|---|\n| what it shows | the layout | **the loop** — answer, next card appears | the loop, on rails |\n| shim work | stub `GET /api/state`, hide the buttons | all six, plus a tiny fake session that adds cards on a timer after an answer | all six, plus a timeline |\n| can they break it | no | yes — they will answer everything and hit the end | no |\n| honest? | yes | yes, if the follow-ups are pre-written and it says so | **only if labelled** — a fake Claude that always says the same thing is a demo, not a lie, but it has to look like one |\n| my guess at cost | ~1 h | ~3–4 h | ~4–5 h |\n\nThe trap in all three is the same and it is worth naming now: **a forked copy of `board.html` rots.** You have already been bitten by a running server serving old code, and the fix there was a version handshake. A demo copy is that failure with no warning attached — the README's demo silently becomes a picture of last month's board.\n\nThe way out is to not fork it: build the demo as `board.html` **plus** a small `demo.js` that installs a `fetch` interceptor before the page's first poll, and have CI (or the test script) fail if the two files drift. Then there is one page, and the demo is a wrapper.",
+   "recommendation": "Answerable, built as a fetch shim over the real board.html — not a fork. Read-only is a screenshot you paid three hours for, and playback is more work than answerable for less proof.",
+   "options": [
+    {
+     "key": "a",
+     "label": "Answerable, shim over the real board.html",
+     "detail": "They answer a card and the follow-up lands. One page, no fork, ~3–4h.",
+     "recommended": true
+    },
+    {
+     "key": "b",
+     "label": "Read-only snapshot",
+     "detail": "~1h and it does render the real thing. Proves layout, not the loop — which is what you said had to land.",
+     "recommended": false
+    },
+    {
+     "key": "c",
+     "label": "Scripted playback, hands off",
+     "detail": "Cards and answers appear on a timeline. Most control over what they see, most work, and they cannot touch it.",
+     "recommended": false
+    },
+    {
+     "key": "d",
+     "label": "Answerable now, playback later if it isn't landing",
+     "detail": "Fine, as long as 'later' means you would actually measure whether it lands.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T09:13:59.314Z",
+   "openedAt": "2026-08-27T09:13:59.315Z",
+   "answer": {
+    "keys": [
+     "b"
+    ],
+    "text": null,
+    "at": "2026-08-27T10:18:14.916Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q8",
+   "parentId": null,
+   "depth": 0,
+   "thread": "The page",
+   "title": "grill-me's whole README is 200 words. Yours is 326 lines. Which is right?",
+   "spoken": "I read grill-me's github page. Title, one paragraph, install, done — under two hundred words, no pictures, no badges. It works because the skill itself is ten lines: you can read the entire thing in a minute. Yours is a five and a half thousand line project and the readme is three hundred and twenty six lines. That's not automatically wrong, but it does mean the first screen is doing a different job, and I want to know which job you think it's doing.",
+   "spokenDetail": "",
+   "kind": "question",
+   "changeId": null,
+   "testId": null,
+   "context": "Measured, both:\n\n| | grill-me | grill-board |\n|---|---|---|\n| README | ~200 words, 4 sections | 326 lines, ~15 KB, 8 sections |\n| the skill | 10 lines | 685 lines |\n| the code | none | 4,300 lines |\n| images | none | none |\n\ngrill-me's page can be short because there is nothing behind it to explain. Yours has a build phase, a checklist, a review loop, multi-agent claiming, an MCP voice server and a gateway — and the README currently explains **all** of them, in order, well.\n\nThe question is who the page is for. Right now it reads as **documentation for someone who has decided**, and the pitch — the part that makes a stranger decide — is the first 30 lines. Everything after \"Answering\" is reference.\n\n| | leave it | pitch on top, reference in `docs/` | cut it to grill-me length |\n|---|---|---|---|\n| a stranger scrolling | reads 3 screens before the payoff | sees the whole argument in one | sees a claim with nothing behind it |\n| someone who installed it | everything is where they left it | one extra click | has to read SKILL.md |\n| work | none | ~1 h of moving, no rewriting | a rewrite, and you lose the good parts |\n| what it costs you | the good writing is buried past the fold | a `docs/` folder to keep current | the multi-agent and voice sections stop being discoverable |\n\nNote what is *not* in question: the writing is good. This is about order, not quality.",
+   "recommendation": "Pitch on top, reference below or in docs/. The first screen becomes GIF-or-demo, the three-line what-it-is, and install — and everything you have already written survives one scroll further down.",
+   "options": [
+    {
+     "key": "a",
+     "label": "Pitch on top, reference moves down or into docs/",
+     "detail": "Keeps every word you wrote; changes what the first screen is for. ~1h of moving.",
+     "recommended": true
+    },
+    {
+     "key": "b",
+     "label": "Leave it — it reads well as one page",
+     "detail": "True. The cost is that the demo, the install and the argument are separated by two screens of scrolling.",
+     "recommended": false
+    },
+    {
+     "key": "c",
+     "label": "Cut hard to grill-me length, link out for the rest",
+     "detail": "Matches the reference you named. You lose the thing that makes this page persuasive, which is the detail.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T09:13:59.315Z",
+   "openedAt": "2026-08-27T09:13:59.315Z",
+   "answer": {
+    "keys": [
+     "a"
+    ],
+    "text": null,
+    "at": "2026-08-27T10:18:38.005Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q9",
+   "parentId": null,
+   "depth": 0,
+   "thread": "Positioning",
+   "title": "Your first paragraph compares it to /grill-me. There is no official /grill-me.",
+   "spoken": "Something I found while looking up grill-me, and it changes your opening. There isn't one grill-me. I found at least eight separate github repos and gists all called some version of it, plus directory listings — none of them official, none canonical. So your second sentence, the one that carries the whole pitch, compares your tool to something the reader may never have heard of and can't reliably go and look up. The question is whether the pitch should stand on its own instead.",
+   "spokenDetail": "",
+   "kind": "question",
+   "changeId": null,
+   "testId": null,
+   "context": "The README's second paragraph, which is where a stranger decides:\n\n> `/grill-me` asks one question, then waits. You answer, it thinks, you wait again.\n> `grill-board` posts questions to a page you keep open…\n\nThat is a **great** sentence for someone who has used grill-me. Searching for it turns up robmitt/grill-me-skill, stevegsax/grill-me, Jekudy/grillme-skill, at least four collection repos with their own copy, a gist, and two directory sites. No official one. The most-linked README is under 200 words and its skill is 10 lines.\n\nSo the comparison does three things at once, and only one of them is good:\n\n- ✅ instantly clear **to the ~5% who know it**\n- ❌ jargon to everyone else, in the sentence that decides whether they keep reading\n- ❌ frames a 5,500-line tool as \"like that small thing, but async\" — which undersells it and invites \"why is this not 10 lines too?\"\n\nThe alternative is to lead with the problem, which needs no priors: *you are answering an agent's questions one at a time, blocked, in a chat log — and the questions are too small because a chat line is small.*\n\n| | keep the comparison | lead with the problem | both — problem first, comparison as an aside |\n|---|---|---|---|\n| reader with no priors | lost for one paragraph | in immediately | in immediately |\n| reader who knows grill-me | instant | one extra sentence | instant, one line down |\n| sells the build/review half | no — it frames it as a Q&A tool | yes | yes |",
+   "recommendation": "Lead with the problem, keep the comparison as a one-line aside further down. The build-and-review half is more than half the tool, and the current opening does not mention it at all.",
+   "options": [
+    {
+     "key": "a",
+     "label": "Lead with the problem; comparison becomes an aside",
+     "detail": "Works with no priors, and lets the first screen say that it builds and reviews too.",
+     "recommended": true
+    },
+    {
+     "key": "b",
+     "label": "Keep the comparison up top",
+     "detail": "Sharpest sentence you have, for the readers who already get it. Costs you everyone else.",
+     "recommended": false
+    },
+    {
+     "key": "c",
+     "label": "Drop grill-me entirely",
+     "detail": "Cleanest positioning. Loses a genuinely useful shorthand and the credit for the idea.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T09:16:33.988Z",
+   "openedAt": "2026-08-27T09:16:33.988Z",
+   "answer": {
+    "keys": [
+     "a"
+    ],
+    "text": null,
+    "at": "2026-08-27T10:21:10.601Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q10",
+   "parentId": null,
+   "depth": 0,
+   "thread": "Trust",
+   "title": "There is no troubleshooting section, and first-run failures are silent-ish",
+   "spoken": "Good news first: I read the code for portability and it's much better than I implied earlier. Five node builtins, no shelling out, nothing mac-only — it should just run on linux. Only the test script is bash-and-curl. So the risk isn't that it breaks, it's what happens in the handful of cases where it does, because right now the readme has eight sections and none of them is 'it didn't work'.",
+   "spokenDetail": "",
+   "kind": "question",
+   "changeId": null,
+   "testId": null,
+   "context": "What I verified in `board.mjs`:\n\n- imports only `node:http`, `node:fs`, `node:path`, `node:url`, `node:os` — no dependencies, **no `execSync`, no `lsof`, no `pbcopy`**, nothing mac-only\n- state directories are `mkdirSync(..., { recursive: true })`, so a missing `~/.claude` is not a failure\n- ports auto-select across 7800–7859, and it dies with a clear message past that\n\nSo it is portable. What is left is the small set of first-run failures a stranger *will* hit, none of which the README addresses:\n\n| | what they see | what is actually wrong |\n|---|---|---|\n| Node too old | a syntax error in a 2,100-line file | README says 18+; **nothing enforces or tests it** — no `engines`, no runtime check |\n| all 60 ports busy | `no free port in 7800-7859` | fine, actually — this one is good |\n| board opens, stays empty | a page saying \"No questions yet\" | usually correct; sometimes the session died |\n| corporate firewall prompt | macOS/Windows asks to allow incoming connections | the `0.0.0.0` bind — related to q5 |\n| they edit board.mjs while a board runs | writes accepted, page never updates | the version handshake catches it — for **you**; a stranger sees a dead board |\n\nThe cheapest honest fix is a runtime version check at the top of `board.mjs` (four lines, turns a stack trace into a sentence) plus a short **If it doesn't work** section. The expensive one is testing it on a clean machine, which q3 explicitly deprioritised.",
+   "recommendation": "The version check and a five-line troubleshooting section. It converts the only failure mode that looks like a broken tool into one that looks like a wrong Node — and it costs under an hour.",
+   "options": [
+    {
+     "key": "a",
+     "label": "Version check + a short \"If it doesn't work\" section",
+     "detail": "~1h. Turns the one scary failure into a sentence.",
+     "recommended": true
+    },
+    {
+     "key": "b",
+     "label": "Version check only",
+     "detail": "The code half, skip the prose. Half an hour.",
+     "recommended": false
+    },
+    {
+     "key": "c",
+     "label": "Neither — you said it lands, not works",
+     "detail": "Consistent with q3. A stranger whose first run throws a stack trace does not file an issue, they close the tab.",
+     "recommended": false
+    },
+    {
+     "key": "d",
+     "label": "Go further: actually run it on a clean Linux box",
+     "detail": "The only option that finds what I cannot find by reading. Half a day and a VM.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T09:16:33.988Z",
+   "openedAt": "2026-08-27T09:16:33.988Z",
+   "answer": {
+    "keys": [
+     "a"
+    ],
+    "text": null,
+    "at": "2026-08-27T10:20:14.886Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q11",
+   "parentId": null,
+   "depth": 0,
+   "thread": "Positioning",
+   "title": "Where does it actually get announced — and is that the same day it goes public?",
+   "spoken": "Last root for now. Making the repo public and telling people are two different acts, and you can do the first without the second. Some people flip the repo public quietly, let it sit, and only post once a couple of strangers have used it. Others post the day it goes up. It matters here because you already chose 'here it is, no promises' — and a front page launch is the one thing that turns that into a support queue whether you wanted one or not.",
+   "spokenDetail": "",
+   "kind": "question",
+   "changeId": null,
+   "testId": null,
+   "context": "You have already settled: clone-install, MIT, no promises, and the page has to sell it. That last one only pays off if someone sees the page.\n\n| | quiet first | announce on day one |\n|---|---|---|\n| what you learn | whether it installs cleanly for 2–3 people, before 500 see it | everything at once, in public |\n| the \"no promises\" stance | holds — small numbers, real conversations | tested immediately; volume makes silence look rude rather than stated |\n| the demo (q4) | you can ship it a week later | it has to be live on day one, or the pitch is text |\n| if there is a bad bug | you fix it and nobody knew | it is in the thread forever |\n\nAnd where. These are not equivalent audiences:\n\n- **r/ClaudeAI / Claude Code communities** — exactly the people who already have `~/.claude/skills`. Highest hit rate, lowest reach.\n- **Show HN** — biggest reach, harshest reading, and the title has to work with no context. \"Show HN: a web board for answering an AI agent's questions out of order\" is the kind of thing that either lands or gets three comments.\n- **X / Bluesky thread with the GIF** — the demo does the work; reach depends entirely on your following.\n- **Skill directories** (claudedirectory.org and similar already index grill-me) — passive, permanent, no launch moment.\n- **Nowhere — just make it public** — it gets found by people searching for exactly this, or it does not.\n\nThe honest note: I do not know your following or your appetite for a comment section, and both change this answer. That is why it is a card and not a recommendation I would stand behind hard.",
+   "recommendation": "Public quietly with the demo live, directories submitted, then a Claude-community post about a week later once one stranger has run it. Hold Show HN until you have seen it work on a machine that is not yours.",
+   "options": [
+    {
+     "key": "a",
+     "label": "Quiet first, community post in ~a week, HN later or never",
+     "detail": "Cheapest way to find the install bug that only strangers find.",
+     "recommended": true
+    },
+    {
+     "key": "b",
+     "label": "Public + announce everywhere on day one",
+     "detail": "One moment, maximum reach. Everything has to be right, including the demo.",
+     "recommended": false
+    },
+    {
+     "key": "c",
+     "label": "Public, submit to directories, never announce",
+     "detail": "Zero launch pressure. It lives or dies on search.",
+     "recommended": false
+    },
+    {
+     "key": "d",
+     "label": "Not yet — this is a v2 question",
+     "detail": "Fair. Then the build is just: licence, demo, README order, and the security default.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T09:16:33.988Z",
+   "openedAt": "2026-08-27T09:16:33.988Z",
+   "answer": {
+    "keys": [
+     "a"
+    ],
+    "text": "I'll post it on HN today.",
+    "at": "2026-08-27T10:21:43.459Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q12",
+   "parentId": "q7",
+   "depth": 2,
+   "thread": "The page",
+   "title": "Read-only demo — so now nothing shows the loop. Does that need fixing?",
+   "spoken": "You picked the live demo over a gif, and then picked read-only. Those two together leave a gap I want to name rather than quietly work around. Your whole claim is that you're never blocked — cards arriving while you answer. A read-only demo shows what the board looks like; it can't show that. So right now nothing on the page demonstrates the one thing that makes this different from a form.",
+   "spokenDetail": "",
+   "kind": "question",
+   "changeId": null,
+   "testId": null,
+   "context": "Where the two answers land:\n\n| | shows the layout | shows cards arriving while you answer |\n|---|---|---|\n| static PNGs | yes | no |\n| **read-only live demo** (q7) | yes, better — real fonts, real palettes, scrollable, theme switch works | **no** |\n| GIF | yes, small | **yes** |\n| answerable demo | yes | yes |\n\nThe README's own headline claim is:\n\n> **You are never blocked.** Questions queue on a board, not in the conversation.\n\nThat is a claim about *time*. A still page cannot carry it, however real the page is.\n\nThree ways out, and they cost very differently now that the demo is cheap:\n\n1. **GIF as well.** ~1–2 h on top. The demo proves it is real; the GIF proves it is live. They do different jobs and neither replaces the other.\n2. **Let the demo auto-advance.** Not answerable — no buttons — but a scripted timeline replays a real session in the real page: a card lands, an answer lands, two follow-ups appear. Somewhere between read-only and playback; maybe +2 h over read-only.\n3. **Say it in words and accept it.** The README already says it well. Some readers will believe a sentence.\n\nWorth knowing: option 2 is what turns your read-only decision into the strongest option on the board, and it is additive — build read-only first, add a timeline on top of the same shim.",
+   "recommendation": "Read-only first, then a GIF. The GIF is the cheaper of the two things that can show time, it works in the README preview and in a social post, and it does not need the demo to be finished.",
+   "options": [
+    {
+     "key": "a",
+     "label": "Read-only demo + a GIF in the README",
+     "detail": "Each does the job the other cannot. ~1h + ~1–2h, and the GIF works everywhere the demo does not.",
+     "recommended": true
+    },
+    {
+     "key": "b",
+     "label": "Make the read-only demo auto-advance on a timeline",
+     "detail": "One artefact instead of two, in the real page. +~2h on the shim, and it only exists on the demo URL.",
+     "recommended": false
+    },
+    {
+     "key": "c",
+     "label": "Neither — the words are enough",
+     "detail": "Zero work. Consistent with 'read-only was enough'; inconsistent with 'it has to land'.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T10:19:20.980Z",
+   "openedAt": "2026-08-27T10:19:20.985Z",
+   "answer": {
+    "keys": [
+     "a"
+    ],
+    "text": null,
+    "at": "2026-08-27T10:23:53.206Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q13",
+   "parentId": "q7",
+   "depth": 2,
+   "thread": "The page",
+   "title": "What board is the demo showing — mid-grill, or the whole arc?",
+   "spoken": "And the other half of the demo decision: what's actually on it. You can show a grill in flight, which is the simplest thing and matches how most people will first use it. Or you can show a finished board that's been all the way through — questions, then the plan, then the checklist, then the diffs coming back for review. The second one is more honest about what the tool is, and it's a lot more to take in at once.",
+   "spokenDetail": "",
+   "kind": "question",
+   "changeId": null,
+   "testId": null,
+   "context": "The demo state file is authored, so this is purely a choice about what to put in it.\n\n| | mid-grill | the whole arc | two demos, linked |\n|---|---|---|---|\n| what they see | 6–8 cards, one expanded, a couple answered | grill → plan + Start building → checklist → review cards with diffs | both, one click apart |\n| screen 1 impression | \"an agent asks me things on a page\" | \"an agent asks, builds, and hands the diffs back\" | clean, and nobody clicks the second link |\n| risk | undersells — the build half is most of the tool and stays invisible | overwhelms — a first-time reader meets five concepts at once | doubles the state file to keep plausible |\n| effort over read-only | none | none, just a longer authored state | a bit more |\n\nThis matters more than it looks. Ask yourself which sentence you want a stranger to say after ten seconds. Right now the README title says \"interrogates a plan\", and the build-and-review half — arguably the more unusual part, and the part nothing else does — appears 100 lines down. A mid-grill demo repeats that same emphasis.\n\nThe content itself should be **real**, whichever you choose: run an actual grill on a small real thing, export the state, trim it. An invented board reads as invented — the cards get too tidy and the diffs stop looking like diffs.",
+   "recommendation": "The whole arc, on a board scrolled to the review cards, with the grill above it. It is the same effort as mid-grill and it shows the thing nobody else does. The overwhelm risk is real but it is a layout problem, not a content one.",
+   "options": [
+    {
+     "key": "a",
+     "label": "The whole arc — grill, plan, checklist, review",
+     "detail": "Same work, shows the half that is actually unusual. Denser first impression.",
+     "recommended": true
+    },
+    {
+     "key": "b",
+     "label": "Mid-grill only",
+     "detail": "Simplest to read in ten seconds. Leaves the build and review half entirely to prose.",
+     "recommended": false
+    },
+    {
+     "key": "c",
+     "label": "Two demos, linked from the README",
+     "detail": "Each one focused. The second link gets clicked by roughly nobody.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T10:19:20.985Z",
+   "openedAt": "2026-08-27T10:19:20.985Z",
+   "answer": {
+    "keys": [
+     "a"
+    ],
+    "text": null,
+    "at": "2026-08-27T10:24:00.741Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q14",
+   "parentId": "q5",
+   "depth": 1,
+   "thread": "Trust",
+   "title": "Auto-token by bind address misses the gateway — the one thing meant to be public",
+   "spoken": "You picked auto-token whenever it binds beyond loopback, and I went to check it didn't break the voice setup. Good news there — it doesn't, the gateway is completely independent. But checking turned up a hole in the rule itself. The gateway binds to loopback, and then you tunnel it to the open internet with cloudflared. The process can't see the tunnel. So the one surface you deliberately put on the public internet is the exact one a bind-address rule leaves unprotected.",
+   "spokenDetail": "",
+   "kind": "question",
+   "changeId": null,
+   "testId": null,
+   "context": "First, the thing I checked, so you can stop worrying about it: **the gateway does not proxy through `serve`.** It calls `makeHandler(getCurrent)` and reads the current board's state file directly, with its own `prefs.gatewayToken`. Auto-minting a token on `serve` cannot break a registered connector.\n\nNow the hole:\n\n```js\n// cmdGateway, board.mjs:2056\nconst host = args.host || '127.0.0.1';   // loopback…\n```\n\n…and then your own README says to do this:\n\n```bash\ncloudflared tunnel --url http://localhost:7799   # or: ngrok http 7799\n```\n\nThe bind is loopback. The reachability is *the entire internet*. A rule keyed on the bind address sees a safe-looking `127.0.0.1` and mints nothing.\n\n| | today | q5's rule as stated | gateway always tokened |\n|---|---|---|---|\n| `serve` on your Mac | open on LAN, no token | tokened ✅ | tokened ✅ |\n| `gateway` + cloudflared | **open to the internet, no token** | **still open** ❌ | tokened ✅ |\n| voice setup flow | `--token` documented, opt-in | unchanged | one less flag to remember |\n\nAnd what is behind that URL is not read-only: `answer`, `ask_better` and `use_board` are all writable over `/mcp`. An untokened tunnel is a stranger answering your cards.\n\nThe README does warn — *\"`--token` is not optional once the board leaves your machine\"* — but that is the same bet q5 just declined to keep making.\n\nThe fix is small: the gateway exists **only** to be reached remotely, so it should mint a token unconditionally rather than asking the bind address a question it cannot answer.",
+   "recommendation": "Gateway always mints a token, no flag needed, with `--no-token` as the deliberate way out. It is the one command in this tool whose whole purpose is remote access — there is no version of it where a token is optional.",
+   "options": [
+    {
+     "key": "a",
+     "label": "Gateway always tokens; --no-token to opt out",
+     "detail": "Matches what the gateway is for. One less flag in the setup, and the insecure state needs typing.",
+     "recommended": true
+    },
+    {
+     "key": "b",
+     "label": "Keep the bind rule everywhere, consistent",
+     "detail": "One rule to explain. Leaves the tunnel case exactly as exposed as it is today.",
+     "recommended": false
+    },
+    {
+     "key": "c",
+     "label": "Gateway refuses to start without --token",
+     "detail": "Loudest, and impossible to get wrong. Breaks anyone's existing gateway command on upgrade.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T10:20:52.408Z",
+   "openedAt": "2026-08-27T10:20:52.409Z",
+   "answer": {
+    "keys": [
+     "a"
+    ],
+    "text": null,
+    "at": "2026-08-27T10:23:17.141Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q15",
+   "parentId": "q6",
+   "depth": 1,
+   "thread": "The skill",
+   "title": "You're splitting SKILL.md. How does the second file actually get read?",
+   "spoken": "You went for the split, so the thing to settle is the failure mode I flagged — a file that never gets read. It's a real one and it's silent: Claude follows the short core, reaches the build phase, and just... carries on from memory instead of opening the file with the rules in it. Nothing errors. The board still fills up. It's only wrong in ways you'd notice a day later.",
+   "spokenDetail": "",
+   "kind": "question",
+   "changeId": null,
+   "testId": null,
+   "context": "The split you picked, roughly:\n\n```\nSKILL.md          the loop, card writing, the rules      (~250 lines)\nBUILDING.md       plan → start → build → test → review   (~200)\nFANNING-OUT.md    claim, --decided, per-agent cursors    (~150)\n```\n\nWhy this is not paranoia: the build phase is precisely where the instructions are **counter-intuitive and easy to skip**. Post the plan before reading a file. Wait for the button; never press it yourself. Log a change in the same breath as marking the step. Author the checklist before the review. Every one of those is a rule that *feels* skippable in the moment, and every one of them is in the file that might not get opened.\n\nFour ways to make it stick, in increasing order of \"actually works\":\n\n| | how it works | fails when |\n|---|---|---|\n| **Pointer in SKILL.md** | \"When the board drains → read BUILDING.md\" | the model is mid-flow and confident; a pointer is an instruction like any other |\n| **Keep the traps, move the examples** | correctness stays in the core; the sub-file holds JSON samples and prose | nothing breaks — you just do not save many tokens, since the traps *are* most of the length |\n| **The CLI says it on the wake** | `[drained]` already prints. Make it print `→ read BUILDING.md before you plan`. The session acts on wake lines all day | it does not — this rides machinery that already drives behaviour |\n| **Both of the last two** | traps stay, examples move, and the wake points at the file anyway | belt and braces |\n\nThat third one is the interesting one and it is nearly free: `describe()` already formats every event, and `[drained]` is the exact moment the build phase begins. Same for `[start]` → the checklist rules. The pointer arrives **when it is needed** rather than 250 lines earlier, which is the whole idea behind splitting in the first place.\n\nThe honest counter: it couples the skill's file layout to strings inside `board.mjs`, so renaming a file silently breaks the pointer. That is a `test-build.sh` check — assert every filename the CLI names exists on disk.",
+   "recommendation": "Wake-line pointers plus keeping the traps in the core. The pointer arrives at the moment of need instead of being remembered from earlier, and a filename check in the test suite closes the one new way it can rot.",
+   "options": [
+    {
+     "key": "a",
+     "label": "Wake-line pointers + traps stay in the core",
+     "detail": "The reminder lands when the phase starts, and correctness never depended on the second file being opened. One new test.",
+     "recommended": true
+    },
+    {
+     "key": "b",
+     "label": "Wake-line pointers only",
+     "detail": "Full token saving, real split. Bets the build phase on a line of CLI output being obeyed.",
+     "recommended": false
+    },
+    {
+     "key": "c",
+     "label": "Plain pointer in SKILL.md, nothing in the CLI",
+     "detail": "How every skill does it. Also how every skill quietly fails to load its reference files.",
+     "recommended": false
+    },
+    {
+     "key": "d",
+     "label": "Move only examples; keep every rule in SKILL.md",
+     "detail": "Zero risk, and honest about it — but it saves maybe 100 lines, so it is close to not splitting.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T10:21:48.352Z",
+   "openedAt": "2026-08-27T10:21:48.352Z",
+   "answer": {
+    "keys": [
+     "a"
+    ],
+    "text": null,
+    "at": "2026-08-27T10:23:41.491Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q16",
+   "parentId": "q11",
+   "depth": 1,
+   "thread": "Scope",
+   "title": "\"HN today\" — that outranks the button you pressed. What gets cut to make it real?",
+   "spoken": "You clicked quiet-first and then wrote that you're posting it to Hacker News today. I'm taking the sentence, not the button — but I want to be straight with you about what it does to the other eleven answers, because three of them were made assuming you had a week. There's about a full day of work on this board and one item on it can silently break the skill. So the question isn't whether to post today. It's which of these ships before you do.",
+   "spokenDetail": "",
+   "kind": "question",
+   "changeId": null,
+   "testId": null,
+   "context": "Everything settled so far, costed, in the order it would have to happen:\n\n| | from | cost | HN-critical? |\n|---|---|---|---|\n| **LICENCE (MIT)** | q2 | 5 min | **yes** — no licence is a guaranteed top comment, and it is the one that makes the repo unusable |\n| **Auto-token past loopback** | q5 | ~30 min + test | **yes** — HN is the exact audience that reads `0.0.0.0` and no auth and says so publicly |\n| **Gateway always tokens** | q14, open | ~15 min | **yes**, same reason, and it is the more exposed of the two |\n| **README: pitch on top, problem-led opening** | q8, q9 | 1–2 h | **yes** — this *is* the submission |\n| **Read-only demo** | q4, q7, q13 open | ~1 h + authoring a real state | **yes** — you chose it over a GIF, so it is the only visual you have |\n| **Version check + troubleshooting** | q10 | ~1 h | mostly — a stack trace on a stranger's Node is an HN comment |\n| **GIF** | q12, open | 1–2 h | it is the only thing that shows the loop |\n| **Split SKILL.md into three files** | q6, q15 open | 2–3 h | **no — and it is the one that can break the tool** |\n\nThat is roughly 7–10 hours, which is a day with nothing going wrong.\n\n**The split is the item to move.** It is the only change on this list that touches how the skill *behaves*, it has no test that would catch it going wrong, and its entire payoff is token cost — which is invisible to every person who reads your HN post. Shipping a freshly-restructured 685-line instruction file on the morning of a launch is how the first stranger's grill goes sideways in a way you find out about in the comments.\n\nAlso worth saying plainly: **q2 was \"here it is, no promises\", and HN is the one venue where that gets tested hardest.** That combination is fine — plenty of good tools ship that way — but a README line saying it out loud, before the comments arrive, reads as a stance. The same line written afterwards reads as a retreat.\n\nOne more, which is yours alone to weigh: **an HN post is once.** A repo can be made public today and posted on Saturday, and the only thing you lose is a day. What you buy is one stranger's clean install and the demo actually being finished.",
+   "recommendation": "Ship the six HN-critical items today, hold the SKILL.md split, and give the GIF the last slot — post when the demo and the README are done, not at a fixed hour. If that lands at 9pm, post tomorrow morning; the submission is the same and the page is better.",
+   "options": [
+    {
+     "key": "a",
+     "label": "Ship the 6 critical, hold the split, GIF last",
+     "detail": "~5–7h. Post when the demo and README are done rather than at a set time.",
+     "recommended": true
+    },
+    {
+     "key": "b",
+     "label": "Everything on this board, then post",
+     "detail": "The split included. Most complete, and the one item that can break the skill goes out untested on launch day.",
+     "recommended": false
+    },
+    {
+     "key": "c",
+     "label": "Bare minimum, post within the hour",
+     "detail": "Licence, both tokens, README opening. No demo, no GIF — so the page is text, which is what you said would not land.",
+     "recommended": false
+    },
+    {
+     "key": "d",
+     "label": "Make it public today, post to HN this weekend",
+     "detail": "Everything gets built properly, one stranger installs it first, and the post is the same post.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T10:22:50.490Z",
+   "openedAt": "2026-08-27T10:22:50.490Z",
+   "answer": {
+    "keys": [
+     "a"
+    ],
+    "text": null,
+    "at": "2026-08-27T10:24:20.310Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q17",
+   "parentId": null,
+   "depth": 0,
+   "thread": "Testing",
+   "title": "A fresh board comes up tokened, and the phone URL still works",
+   "spoken": "Can you check this for me: A fresh board comes up tokened, and the phone URL still works",
+   "spokenDetail": "Run a throwaway grill: `node ~/.claude/skills/grill-board/board.mjs serve --state /tmp/t/state.json --title Test` in a terminal. Open the `local` URL it prints in a browser, then the `phone` URL on your actual phone, on the same wifi.",
+   "kind": "test",
+   "changeId": null,
+   "testId": "t1",
+   "context": "Run a throwaway grill: `node ~/.claude/skills/grill-board/board.mjs serve --state /tmp/t/state.json --title Test` in a terminal. Open the `local` URL it prints in a browser, then the `phone` URL on your actual phone, on the same wifi.\n\n**Should happen:** Both URLs carry `?t=<32 chars>` and both load the board. Stripping the `?t=` off either one gives you 401 Unauthorized instead of the page.\n\n*Covers this change:*\n\n- serve mints a token whenever it binds past loopback",
+   "recommendation": "",
+   "options": [
+    {
+     "key": "pass",
+     "label": "Works",
+     "detail": "Does what it should.",
+     "recommended": false
+    },
+    {
+     "key": "fail",
+     "label": "Doesn't work",
+     "detail": "Say what you saw — that is what I fix from.",
+     "recommended": false
+    },
+    {
+     "key": "skip",
+     "label": "Can't test now",
+     "detail": "Not blocked on it; the review goes ahead without this one.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T12:30:59.424Z",
+   "openedAt": "2026-08-27T12:30:59.424Z",
+   "answer": {
+    "keys": [
+     "skip"
+    ],
+    "text": null,
+    "at": "2026-08-27T12:32:01.178Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q18",
+   "parentId": null,
+   "depth": 0,
+   "thread": "Testing",
+   "title": "The escape hatches are real, not theoretical",
+   "spoken": "Can you check this for me: The escape hatches are real, not theoretical",
+   "spokenDetail": "Same board, two more runs: once with `--host 127.0.0.1`, once with `--no-token`. Look at what each prints.",
+   "kind": "test",
+   "changeId": null,
+   "testId": "t2",
+   "context": "Same board, two more runs: once with `--host 127.0.0.1`, once with `--no-token`. Look at what each prints.\n\n**Should happen:** `--host 127.0.0.1` prints no token and no phone URL, and the local URL has no `?t=`. `--no-token` prints no token but still prints a phone URL. Both load without one.\n\n*Covers this change:*\n\n- serve mints a token whenever it binds past loopback",
+   "recommendation": "",
+   "options": [
+    {
+     "key": "pass",
+     "label": "Works",
+     "detail": "Does what it should.",
+     "recommended": false
+    },
+    {
+     "key": "fail",
+     "label": "Doesn't work",
+     "detail": "Say what you saw — that is what I fix from.",
+     "recommended": false
+    },
+    {
+     "key": "skip",
+     "label": "Can't test now",
+     "detail": "Not blocked on it; the review goes ahead without this one.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T12:30:59.424Z",
+   "openedAt": "2026-08-27T12:30:59.424Z",
+   "answer": {
+    "keys": [
+     "skip"
+    ],
+    "text": null,
+    "at": "2026-08-27T12:32:08.068Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q19",
+   "parentId": null,
+   "depth": 0,
+   "thread": "Testing",
+   "title": "The demo renders as a plain file, with no server at all",
+   "spoken": "Can you check this for me: The demo renders as a plain file, with no server at all",
+   "spokenDetail": "Open `demo/index.html` by double-clicking it in Finder — file:// , not localhost. Scroll it. Click a card open. Press `L` to flip light/dark and `P` for the palette picker.",
+   "kind": "test",
+   "changeId": null,
+   "testId": "t3",
+   "context": "Open `demo/index.html` by double-clicking it in Finder — file:// , not localhost. Scroll it. Click a card open. Press `L` to flip light/dark and `P` for the palette picker.\n\n**Should happen:** 16 cards and the 8-step build panel render. The ribbon sits at the bottom saying nothing is saved. Cards expand, the theme flips, palettes switch. No 'offline' banner and no 'this board's server is older than this page' warning.\n\n*Covers this change:*\n\n- A static demo that is the real board.html, not a copy of it",
+   "recommendation": "",
+   "options": [
+    {
+     "key": "pass",
+     "label": "Works",
+     "detail": "Does what it should.",
+     "recommended": false
+    },
+    {
+     "key": "fail",
+     "label": "Doesn't work",
+     "detail": "Say what you saw — that is what I fix from.",
+     "recommended": false
+    },
+    {
+     "key": "skip",
+     "label": "Can't test now",
+     "detail": "Not blocked on it; the review goes ahead without this one.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T12:30:59.424Z",
+   "openedAt": "2026-08-27T12:30:59.424Z",
+   "answer": {
+    "keys": [
+     "skip"
+    ],
+    "text": null,
+    "at": "2026-08-27T12:32:10.551Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q20",
+   "parentId": null,
+   "depth": 0,
+   "thread": "Testing",
+   "title": "Answering something in the demo doesn't look broken",
+   "spoken": "Can you check this for me: Answering something in the demo doesn't look broken",
+   "spokenDetail": "In that same demo page, pick any card and answer it — click a choice, then send.",
+   "kind": "test",
+   "changeId": null,
+   "testId": "t4",
+   "context": "In that same demo page, pick any card and answer it — click a choice, then send.\n\n**Should happen:** The card collapses and shows your answer, and stays that way. It does NOT flicker back open a second later, and no error or offline banner appears.\n\n*Covers this change:*\n\n- A static demo that is the real board.html, not a copy of it",
+   "recommendation": "",
+   "options": [
+    {
+     "key": "pass",
+     "label": "Works",
+     "detail": "Does what it should.",
+     "recommended": false
+    },
+    {
+     "key": "fail",
+     "label": "Doesn't work",
+     "detail": "Say what you saw — that is what I fix from.",
+     "recommended": false
+    },
+    {
+     "key": "skip",
+     "label": "Can't test now",
+     "detail": "Not blocked on it; the review goes ahead without this one.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T12:30:59.424Z",
+   "openedAt": "2026-08-27T12:30:59.424Z",
+   "answer": {
+    "keys": [
+     "skip"
+    ],
+    "text": null,
+    "at": "2026-08-27T12:32:12.165Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q21",
+   "parentId": null,
+   "depth": 0,
+   "thread": "Testing",
+   "title": "The GIF plays, and reads at README width",
+   "spoken": "Can you check this for me: The GIF plays, and reads at README width",
+   "spokenDetail": "Open `docs/grill-board.gif`. Watch it once through without pausing. Then shrink the window to about the width of a GitHub README column and watch again.",
+   "kind": "test",
+   "changeId": null,
+   "testId": "t5",
+   "context": "Open `docs/grill-board.gif`. Watch it once through without pausing. Then shrink the window to about the width of a GitHub README column and watch again.\n\n**Should happen:** You can follow it: cards appear, one gets answered, more appear, the plan goes up and pauses on Start building, then steps tick over. Text is legible at README width. About 11 seconds, and it loops.\n\n*Covers this change:*\n\n- A GIF that replays a real board, generated rather than recorded",
+   "recommendation": "",
+   "options": [
+    {
+     "key": "pass",
+     "label": "Works",
+     "detail": "Does what it should.",
+     "recommended": false
+    },
+    {
+     "key": "fail",
+     "label": "Doesn't work",
+     "detail": "Say what you saw — that is what I fix from.",
+     "recommended": false
+    },
+    {
+     "key": "skip",
+     "label": "Can't test now",
+     "detail": "Not blocked on it; the review goes ahead without this one.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T12:30:59.424Z",
+   "openedAt": "2026-08-27T12:30:59.424Z",
+   "answer": {
+    "keys": [
+     "skip"
+    ],
+    "text": null,
+    "at": "2026-08-27T12:32:14.226Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q22",
+   "parentId": null,
+   "depth": 0,
+   "thread": "Testing",
+   "title": "Read the README top to bottom as a stranger would",
+   "spoken": "Can you check this for me: Read the README top to bottom as a stranger would",
+   "spokenDetail": "Open README.md in a markdown preview, start at the top and read until you'd have stopped if it weren't yours. Note where that was.",
+   "kind": "test",
+   "changeId": null,
+   "testId": "t6",
+   "context": "Open README.md in a markdown preview, start at the top and read until you'd have stopped if it weren't yours. Note where that was.\n\n**Should happen:** The first screen tells you what problem this solves without needing to know what /grill-me is, and mentions that it builds and reviews too. Nothing you'd have cut is above the fold.\n\n*Covers this change:*\n\n- The README leads with the problem, and the reference moves below the fold",
+   "recommendation": "",
+   "options": [
+    {
+     "key": "pass",
+     "label": "Works",
+     "detail": "Does what it should.",
+     "recommended": false
+    },
+    {
+     "key": "fail",
+     "label": "Doesn't work",
+     "detail": "Say what you saw — that is what I fix from.",
+     "recommended": false
+    },
+    {
+     "key": "skip",
+     "label": "Can't test now",
+     "detail": "Not blocked on it; the review goes ahead without this one.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T12:30:59.424Z",
+   "openedAt": "2026-08-27T12:30:59.424Z",
+   "answer": {
+    "keys": [
+     "skip"
+    ],
+    "text": null,
+    "at": "2026-08-27T12:32:17.059Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q23",
+   "parentId": null,
+   "depth": 0,
+   "thread": "Review",
+   "title": "MIT licence, and the README says what \"no promises\" means",
+   "spoken": "Done: the repo has an MIT licence file, and the readme's licence section now says so instead of saying none yet, private. I also wrote your no-promises stance into it — issues open, nothing guaranteed, fork it if you need it stable — because saying that before the comments arrive reads very differently from saying it after.",
+   "spokenDetail": "The repo now carries a standard MIT `LICENSE` (2026 Musab Ilhan), and the README's Licence section says so instead of **\"None yet — private.\"**\n\nThe second paragraph is the part worth reading. You picked *\"here it is, no promises\"* — so I wrote that stance out in the README **now**, before anyone comments, rather than leaving it to be inferred. It says issues are open and read, that nothing is promised to be answered or kept stable, and that a fork is the answer if you need it to stay put.\n\nq16 called this out: the same sentence written after an HN thread reads as a retreat. Written first, it reads as a position.",
+   "kind": "review",
+   "changeId": "c1",
+   "testId": null,
+   "context": "The repo now carries a standard MIT `LICENSE` (2026 Musab Ilhan), and the README's Licence section says so instead of **\"None yet — private.\"**\n\nThe second paragraph is the part worth reading. You picked *\"here it is, no promises\"* — so I wrote that stance out in the README **now**, before anyone comments, rather than leaving it to be inferred. It says issues are open and read, that nothing is promised to be answered or kept stable, and that a fork is the answer if you need it to stay put.\n\nq16 called this out: the same sentence written after an HN thread reads as a retreat. Written first, it reads as a position.\n\n**Files** — `LICENSE`, `README.md:324-332`\n\n**Because you decided**\n\n- **q2** What are you actually signing up for once strangers have it?\n  → \"Here it is\" — MIT, no promises\n\n```diff\n--- /dev/null\n+++ b/LICENSE\n@@ -0,0 +1,21 @@\n+MIT License\n+\n+Copyright (c) 2026 Musab Ilhan\n+\n+Permission is hereby granted, free of charge, to any person obtaining a copy\n+of this software and associated documentation files (the \"Software\"), to deal\n+in the Software without restriction, including without limitation the rights\n+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\n+copies of the Software, and to permit persons to whom the Software is\n+furnished to do so, subject to the following conditions:\n+\n+The above copyright notice and this permission notice shall be included in all\n+copies or substantial portions of the Software.\n+\n+THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\n+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\n+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\n+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\n+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\n+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\n+SOFTWARE.\n\n--- a/README.md\n+++ b/README.md\n@@ -324,4 +324,9 @@\n ## Licence\n \n-None yet — private.\n+MIT — see [LICENSE](LICENSE). Use it, fork it, ship it.\n+\n+It comes as it is. I built this for my own work and put it up because it turned\n+out to be worth having; issues are open and I read them, but I make no promise\n+to answer or to keep anything stable. If you need it to stay put, fork it.\n```",
+   "recommendation": "The copyright line says **Musab Ilhan**, taken from your git config — not a legal name I verified with you. If you want a different name, an org, or a second holder on there, that is a one-line edit and better done before the repo is public than after.",
+   "options": [
+    {
+     "key": "ok",
+     "label": "Looks right",
+     "detail": "Accepted as written.",
+     "recommended": true
+    },
+    {
+     "key": "revise",
+     "label": "Change the code",
+     "detail": "The decision stands — say what to change and I rewrite it.",
+     "recommended": false
+    },
+    {
+     "key": "reopen",
+     "label": "Wrong call — reopen q2",
+     "detail": "Sends q2 back to be decided again, and this gets rebuilt from the new answer.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T12:32:17.063Z",
+   "openedAt": "2026-08-27T12:32:17.063Z",
+   "answer": {
+    "keys": [
+     "ok"
+    ],
+    "text": null,
+    "at": "2026-08-27T12:32:29.439Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q24",
+   "parentId": null,
+   "depth": 0,
+   "thread": "Review",
+   "title": "serve mints a token whenever it binds past loopback",
+   "spoken": "The board now gives itself a password whenever it listens on the network, which is the default. Your phone still works — the link just carries the token now. On localhost only, it stays open, and there's a no-token flag if you want it open on a network you trust. I checked that restarting keeps the same token, so a link already open on a phone doesn't break.",
+   "spokenDetail": "A board bound to `0.0.0.0` — which is still the default, so the phone still works — now comes up with a token, and every URL it prints carries `?t=`. Bound to `127.0.0.1` it stays open, because nothing but you can reach it.\n\nThe insecure-by-default state is no longer reachable by accident. It is still reachable **on purpose**: `--no-token` serves it open on a network you trust.\n\nThe rule is one expression, and the order matters — an explicit flag always beats the inference:\n\n```js\nconst want = args['no-token'] ? false\n  : typeof args.token === 'string' ? args.token   // --token X\n  : args.token ? true                            // --token\n  : !LOOPBACK.has(host);                         // the new bit\n```\n\nThe token is **persisted on the board**, which was already true — so restarting does not invalidate a link already open on a phone. I checked that specifically, because it is the one way this change could have quietly hurt.\n\nAlso: it says why. An unexplained token in a URL reads as a bug, so the first run prints `minted because this binds 0.0.0.0, not loopback` and names both escape hatches.",
+   "kind": "review",
+   "changeId": "c2",
+   "testId": null,
+   "context": "A board bound to `0.0.0.0` — which is still the default, so the phone still works — now comes up with a token, and every URL it prints carries `?t=`. Bound to `127.0.0.1` it stays open, because nothing but you can reach it.\n\nThe insecure-by-default state is no longer reachable by accident. It is still reachable **on purpose**: `--no-token` serves it open on a network you trust.\n\nThe rule is one expression, and the order matters — an explicit flag always beats the inference:\n\n```js\nconst want = args['no-token'] ? false\n  : typeof args.token === 'string' ? args.token   // --token X\n  : args.token ? true                            // --token\n  : !LOOPBACK.has(host);                         // the new bit\n```\n\nThe token is **persisted on the board**, which was already true — so restarting does not invalidate a link already open on a phone. I checked that specifically, because it is the one way this change could have quietly hurt.\n\nAlso: it says why. An unexplained token in a URL reads as a bug, so the first run prints `minted because this binds 0.0.0.0, not loopback` and names both escape hatches.\n\n**Files** — `board.mjs:1234-1258`, `board.mjs:1300-1310`\n\n**Because you decided**\n\n- **q5** The board binds to 0.0.0.0 with no password. Is that OK to hand a stranger?\n  → Auto-token whenever it binds beyond loopback\n\n```diff\n--- a/board.mjs\n+++ b/board.mjs\n@@ -1231,8 +1231,26 @@\n+// Which addresses mean \"only this machine\". Anything else is reachable by\n+// something that is not you, which is the whole basis of the token rule below.\n+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);\n+\n async function serve() {\n   const p = statePath();\n+  const host = args.host || '0.0.0.0';\n+  // A board that binds past loopback is readable AND WRITABLE by anything that\n+  // can reach the port, and writable means someone else answering a card the\n+  // session then acts on — an injection path into what gets built, not just a\n+  // leak. The README used to warn about this 250 lines down, which is a bet on\n+  // strangers reading the whole page. So the token is minted for them: the\n+  // phone URL still works, it just carries `?t=` now.\n+  //\n+  // `--token` still forces one on (and `--token X` still sets it), `--no-token`\n+  // is the deliberate way back to an open board on a network you trust.\n+  const want = args['no-token'] ? false\n+    : typeof args.token === 'string' ? args.token\n+    : args.token ? true\n+    : !LOOPBACK.has(host);\n\n@@ -1258,11 +1276,8 @@\n-    if (args.token) cur.token = args.token === true ? (cur.token || randomToken()) : String(args.token);\n-    TOKEN = args.token ? cur.token : null;\n+    if (want) cur.token = typeof want === 'string' ? want : (cur.token || randomToken());\n+    TOKEN = want ? cur.token : null;\n   });\n \n-  const host = args.host || '0.0.0.0';\n   const port = await findPort(host, args.port);\n\n@@ -1300,7 +1310,14 @@\n-    if (TOKEN) process.stdout.write(`  token  ${TOKEN}  (also accepted as: Authorization: Bearer …)\\n`);\n+    if (TOKEN) {\n+      process.stdout.write(`  token  ${TOKEN}  (also accepted as: Authorization: Bearer …)\\n`);\n+      // Say why, once, or an unexplained token in the URL reads as a bug. It is\n+      // persisted, so this line is about the FIRST run on a given board.\n+      if (!args.token) {\n+        process.stdout.write(`         minted because this binds ${host}, not loopback — the URLs above carry it.\\n`);\n+        process.stdout.write(`         --host 127.0.0.1 for this machine only · --no-token to serve it open\\n`);\n+      }\n+    }\n```",
+   "recommendation": "**This changes an existing user's URL.** Someone who restarts a board that had no token gets one, and a link they had already shared stops working until they re-copy it. Given q16's HN-today framing that is the right trade, but it is a real behaviour change on upgrade and nothing warns them about it — the persisted-token guarantee only protects a board that already had one.\n\nThe `LOOPBACK` set covers `127.0.0.1`, `localhost`, `::1`, `[::1]`. It does **not** treat other 127.x.x.x addresses as loopback, so `--host 127.0.0.2` would mint a token it does not need. Harmless, and I would rather over-mint than under-mint.",
+   "options": [
+    {
+     "key": "ok",
+     "label": "Looks right",
+     "detail": "Accepted as written.",
+     "recommended": true
+    },
+    {
+     "key": "revise",
+     "label": "Change the code",
+     "detail": "The decision stands — say what to change and I rewrite it.",
+     "recommended": false
+    },
+    {
+     "key": "reopen",
+     "label": "Wrong call — reopen q5",
+     "detail": "Sends q5 back to be decided again, and this gets rebuilt from the new answer.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T12:32:17.063Z",
+   "openedAt": "2026-08-27T12:32:17.063Z",
+   "answer": {
+    "keys": [
+     "ok"
+    ],
+    "text": null,
+    "at": "2026-08-27T12:32:48.222Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q25",
+   "parentId": null,
+   "depth": 0,
+   "thread": "Review",
+   "title": "The gateway always mints a token, because a tunnel is invisible to a bind check",
+   "spoken": "The gateway now always has a password. It binds to localhost and then you tunnel it to the internet — so checking the bind address tells you nothing, which is why it can't use the same rule the board uses. There's a no-token flag if you really want it open, and it warns you not to tunnel that. I checked a registered connector survives a restart.",
+   "spokenDetail": "`gateway` now comes up tokened whether you ask or not, and `--no-token` is the only way to an open one — where it says so out loud: **`token NONE — --no-token was passed. Do not tunnel this.`**\n\nThis is the hole the bind rule from c2 could never close. The gateway binds `127.0.0.1`, which any address check reads as safe, and then your own README tells you to point `cloudflared` at it. The process cannot see the tunnel. So the one surface deliberately placed on the open internet was the one surface a bind rule left open.\n\nWhat is behind that URL is not read-only: `answer`, `ask_better` and `use_board` are writable over `/mcp`. An untokened tunnel is a stranger answering your cards, and the session builds from the answers.\n\nVerified: default mints and 401s an untokened request; `--no-token` serves open and says so; and the token is persisted in prefs, so restarting the gateway twice returned the same value both times — a connector registered once stays registered.",
+   "kind": "review",
+   "changeId": "c3",
+   "testId": null,
+   "context": "`gateway` now comes up tokened whether you ask or not, and `--no-token` is the only way to an open one — where it says so out loud: **`token NONE — --no-token was passed. Do not tunnel this.`**\n\nThis is the hole the bind rule from c2 could never close. The gateway binds `127.0.0.1`, which any address check reads as safe, and then your own README tells you to point `cloudflared` at it. The process cannot see the tunnel. So the one surface deliberately placed on the open internet was the one surface a bind rule left open.\n\nWhat is behind that URL is not read-only: `answer`, `ask_better` and `use_board` are writable over `/mcp`. An untokened tunnel is a stranger answering your cards, and the session builds from the answers.\n\nVerified: default mints and 401s an untokened request; `--no-token` serves open and says so; and the token is persisted in prefs, so restarting the gateway twice returned the same value both times — a connector registered once stays registered.\n\n**Files** — `board.mjs:2062-2082`\n\n**Because you decided**\n\n- **q14** Auto-token by bind address misses the gateway — the one thing meant to be public\n  → Gateway always tokens; --no-token to opt out\n\n```diff\n--- a/board.mjs\n+++ b/board.mjs\n@@ -2060,11 +2060,22 @@\n   const prefs = loadPrefs();\n-  if (args.token) {\n-    prefs.gatewayToken = args.token === true ? (prefs.gatewayToken || randomToken()) : String(args.token);\n-    savePrefs(prefs);\n-    TOKEN = prefs.gatewayToken;\n-  }\n+  // The gateway is the one command here whose ONLY purpose is to be reached\n+  // from somewhere else — the README tells you to point cloudflared at it. So\n+  // the bind-address rule `serve` uses is useless here: the bind is loopback\n+  // and the reachability is the open internet, and a process cannot see a\n+  // tunnel. It mints unconditionally instead, and `--no-token` is the way out.\n+  //\n+  // What is behind that URL is not read-only. `answer`, `ask_better` and\n+  // `use_board` are all writable over /mcp — an untokened tunnel is a stranger\n+  // answering your cards, which the session then builds from.\n+  if (!args['no-token']) {\n+    prefs.gatewayToken = typeof args.token === 'string' ? args.token : (prefs.gatewayToken || randomToken());\n+    savePrefs(prefs);\n+    TOKEN = prefs.gatewayToken;\n+  }\n   const host = args.host || '127.0.0.1';\n\n@@ -2076,6 +2087,7 @@\n     if (TOKEN) process.stdout.write(`  token   ${TOKEN}\\n`);\n+    else process.stdout.write('  token   NONE — --no-token was passed. Do not tunnel this.\\n');\n```",
+   "recommendation": "Same upgrade edge as c2, and slightly sharper here. Anyone who has already registered a connector against an **untokened** gateway URL will find it 401s after this change, and a registered connector is exactly the thing you set up once and forget. The persistence guarantee only protects a gateway that already had a token.\n\nI also moved from `if (args.token)` to `if (!args['no-token'])`, so a bare `--token` no longer means anything different from the default. That is intended, but it does silently change what an existing scripted `gateway --token` does: nothing, rather than turning something on.",
+   "options": [
+    {
+     "key": "ok",
+     "label": "Looks right",
+     "detail": "Accepted as written.",
+     "recommended": true
+    },
+    {
+     "key": "revise",
+     "label": "Change the code",
+     "detail": "The decision stands — say what to change and I rewrite it.",
+     "recommended": false
+    },
+    {
+     "key": "reopen",
+     "label": "Wrong call — reopen q14",
+     "detail": "Sends q14 back to be decided again, and this gets rebuilt from the new answer.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T12:32:17.063Z",
+   "openedAt": "2026-08-27T12:32:17.063Z",
+   "answer": {
+    "keys": [
+     "ok"
+    ],
+    "text": null,
+    "at": "2026-08-27T12:32:33.227Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q26",
+   "parentId": null,
+   "depth": 0,
+   "thread": "Review",
+   "title": "An old Node is now a sentence, not a stack trace",
+   "spoken": "Running it on an old Node used to throw an error from somewhere in the middle of two thousand lines, which reads as the tool being broken rather than the node being old. Now it says so in one sentence and tells you how to fix it. I also checked the readme's claim of node eighteen was actually right — it is.",
+   "spokenDetail": "The README has claimed **Node 18+** the whole time and nothing enforced it — no `engines`, no check. On an older Node the first thing a stranger saw was a runtime error partway through a 2,100-line file, which reads as *\"this tool is broken\"*, and that is not a bug report anyone files. It is a closed tab.\n\nEight lines at the top of `board.mjs` now say it plainly and exit 1, naming the fix and the fact that there is nothing else to install.\n\n```\ngrill-board needs Node 18 or newer — this is Node 16.4.0.\n  nvm install 18   (or brew install node / your package manager)\n  Nothing else is required: no dependencies, nothing to build.\n```\n\nI also checked what the floor actually is rather than trusting the README: the file uses **no** `Object.hasOwn`, `.at()`, `findLast`, `toSorted`, `structuredClone` or `AbortSignal` — nothing above Node 18. So 18 is honest, not a guess.\n\nVerified both ways: it still runs normally here on Node 22, and with the version forced to 16 it prints the message and exits 1.",
+   "kind": "review",
+   "changeId": "c4",
+   "testId": null,
+   "context": "The README has claimed **Node 18+** the whole time and nothing enforced it — no `engines`, no check. On an older Node the first thing a stranger saw was a runtime error partway through a 2,100-line file, which reads as *\"this tool is broken\"*, and that is not a bug report anyone files. It is a closed tab.\n\nEight lines at the top of `board.mjs` now say it plainly and exit 1, naming the fix and the fact that there is nothing else to install.\n\n```\ngrill-board needs Node 18 or newer — this is Node 16.4.0.\n  nvm install 18   (or brew install node / your package manager)\n  Nothing else is required: no dependencies, nothing to build.\n```\n\nI also checked what the floor actually is rather than trusting the README: the file uses **no** `Object.hasOwn`, `.at()`, `findLast`, `toSorted`, `structuredClone` or `AbortSignal` — nothing above Node 18. So 18 is honest, not a guess.\n\nVerified both ways: it still runs normally here on Node 22, and with the version forced to 16 it prints the message and exits 1.\n\n**Files** — `board.mjs:28-44`\n\n**Because you decided**\n\n- **q10** There is no troubleshooting section, and first-run failures are silent-ish\n  → Version check + a short \"If it doesn't work\" section\n\n```diff\n--- a/board.mjs\n+++ b/board.mjs\n@@ -26,6 +26,24 @@\n import { networkInterfaces, homedir } from 'node:os';\n \n+// The floor the README claims, enforced rather than hoped for. Without this an\n+// old Node throws somewhere in the middle of 2,100 lines and a stranger reads\n+// it as \"this tool is broken\" — which is not a bug report anyone files, it is a\n+// closed tab. Note what it CANNOT catch: if a future edit uses syntax an old\n+// Node cannot parse, the file dies before this line runs. Nothing in here does\n+// today (no `.at`, no `findLast`, no `Object.hasOwn`, no `structuredClone`), so\n+// keep it that way and this check stays the whole story.\n+const NODE_MIN = 18;\n+const nodeMajor = Number(process.versions.node.split('.')[0]);\n+if (nodeMajor < NODE_MIN) {\n+  process.stderr.write(\n+    `grill-board needs Node ${NODE_MIN} or newer — this is Node ${process.versions.node}.\\n` +\n+    '  nvm install 18   (or brew install node / your package manager)\\n' +\n+    '  Nothing else is required: no dependencies, nothing to build.\\n'\n+  );\n+  process.exit(1);\n+}\n+\n const HERE = dirname(fileURLToPath(import.meta.url));\n```",
+   "recommendation": "**It cannot catch a syntax error**, and that is the failure it would most want to catch. ES module imports resolve before any statement runs, so if a future edit uses syntax an old Node cannot parse, the file dies before line 28 and the stranger gets the stack trace anyway. Nothing enforces that — it is a comment asking the next person not to.\n\nI did not add an `engines` field, because there is no `package.json`, and adding one to a zero-dependency skill to hold a single field felt like inviting `npm install` into something that does not need it. Reasonable people would do the opposite.",
+   "options": [
+    {
+     "key": "ok",
+     "label": "Looks right",
+     "detail": "Accepted as written.",
+     "recommended": true
+    },
+    {
+     "key": "revise",
+     "label": "Change the code",
+     "detail": "The decision stands — say what to change and I rewrite it.",
+     "recommended": false
+    },
+    {
+     "key": "reopen",
+     "label": "Wrong call — reopen q10",
+     "detail": "Sends q10 back to be decided again, and this gets rebuilt from the new answer.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T12:32:17.063Z",
+   "openedAt": "2026-08-27T12:32:17.063Z",
+   "answer": {
+    "keys": [
+     "ok"
+    ],
+    "text": null,
+    "at": "2026-08-27T12:32:35.299Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q27",
+   "parentId": null,
+   "depth": 0,
+   "thread": "Review",
+   "title": "The suite covers the token rule, and stops putting itself on the network",
+   "spoken": "Worth knowing: the token change broke thirty seven of the fifty seven tests, because they were all talking to boards over HTTP without one. That's the same thing that would happen to anyone who'd scripted against this. Fixed by pointing the test servers at localhost, and then adding thirteen new checks so the rule is actually pinned. Seventy checks now, all green.",
+   "spokenDetail": "**The token change broke 37 of 57 checks.** Every test that talks to a board over HTTP was curling an untokened URL, and every one of them got a 401. That is worth saying plainly rather than burying: it is exactly what will happen to anyone who has scripted against a board, and it is the reason this step existed.\n\nTwo things fixed it, and the second is the point.\n\n**Test servers now bind `127.0.0.1`.** They never needed the LAN, and there is a second benefit for a public repo: running the suite on a stranger's Mac or Windows box no longer triggers an *\"allow incoming connections\"* firewall prompt on first run.\n\n**Then thirteen new checks, so the rule is pinned rather than worked around:**\n\n```\n== the board does not go on the network naked\n  ok   binding past loopback mints one        ok   the token gets you in\n  ok   and says why                           ok   so does a bearer header\n  ok   an untokened read is refused           ok   and it survives a restart\n  ok   loopback stays open                    ok   --no-token is a real way out\n== the gateway is public by definition\n  ok   it mints without being asked           ok   and refuses an untokened read\n== an old Node is told, not crashed into\n  ok   it exits nonzero   ok   and names the floor   ok   and how to fix it\n```\n\nThe restart check is the one I care most about: it asserts a token survives `--adopt`, because a token that changed on restart would break the phone link it exists to protect.\n\n**57 → 70 checks, all green.**",
+   "kind": "review",
+   "changeId": "c5",
+   "testId": null,
+   "context": "**The token change broke 37 of 57 checks.** Every test that talks to a board over HTTP was curling an untokened URL, and every one of them got a 401. That is worth saying plainly rather than burying: it is exactly what will happen to anyone who has scripted against a board, and it is the reason this step existed.\n\nTwo things fixed it, and the second is the point.\n\n**Test servers now bind `127.0.0.1`.** They never needed the LAN, and there is a second benefit for a public repo: running the suite on a stranger's Mac or Windows box no longer triggers an *\"allow incoming connections\"* firewall prompt on first run.\n\n**Then thirteen new checks, so the rule is pinned rather than worked around:**\n\n```\n== the board does not go on the network naked\n  ok   binding past loopback mints one        ok   the token gets you in\n  ok   and says why                           ok   so does a bearer header\n  ok   an untokened read is refused           ok   and it survives a restart\n  ok   loopback stays open                    ok   --no-token is a real way out\n== the gateway is public by definition\n  ok   it mints without being asked           ok   and refuses an untokened read\n== an old Node is told, not crashed into\n  ok   it exits nonzero   ok   and names the floor   ok   and how to fix it\n```\n\nThe restart check is the one I care most about: it asserts a token survives `--adopt`, because a token that changed on restart would break the phone link it exists to protect.\n\n**57 → 70 checks, all green.**\n\n**Files** — `test-build.sh:30`, `test-build.sh:128`, `test-build.sh:228`, `test-build.sh:270-330`\n\n**Because you decided**\n\n- **q5** The board binds to 0.0.0.0 with no password. Is that OK to hand a stranger?\n  → Auto-token whenever it binds beyond loopback\n- **q14** Auto-token by bind address misses the gateway — the one thing meant to be public\n  → Gateway always tokens; --no-token to opt out\n- **q10** There is no troubleshooting section, and first-run failures are silent-ish\n  → Version check + a short \"If it doesn't work\" section\n\n```diff\n--- a/test-build.sh\n+++ b/test-build.sh\n@@ -30 +30 @@\n-  node \"$B\" serve --state \"$st\" --port \"$pt\" >/dev/null 2>&1 &\n+  node \"$B\" serve --state \"$st\" --port \"$pt\" --host 127.0.0.1 >/dev/null 2>&1 &\n@@ -128 +128 @@\n-node \"$B\" serve --state \"$S\" --port \"$PORT\" >\"$ROOT/serve.log\" 2>&1 &\n+node \"$B\" serve --state \"$S\" --port \"$PORT\" --host 127.0.0.1 >\"$ROOT/serve.log\" 2>&1 &\n@@ -228 +228 @@\n-node \"$B\" serve --state \"$S5\" --port \"$PT\" >/dev/null 2>&1 &\n+node \"$B\" serve --state \"$S5\" --port \"$PT\" --host 127.0.0.1 >/dev/null 2>&1 &\n@@ -270,0 +271,60 @@\n+# The board is writable by whoever can reach it, so \"who can reach it\" is not a\n+# detail. These four cases are the whole rule, and the last two are the escape\n+# hatches — a rule with no way out strands anyone on a LAN they trust.\n+echo '== the board does not go on the network naked'\n+TOK=$(awk '/^  token /{print $2}' \"$ROOT/tok.out\")\n+is \"binding past loopback mints one\"  \"$([ -n \"$TOK\" ] && echo yes)\" \"yes\"\n+is \"an untokened read is refused\"     \"$(curl -s -o /dev/null -w '%{http_code}' \"http://localhost:$P7/api/state\")\" \"401\"\n+is \"the token gets you in\"            \"$(curl -s -o /dev/null -w '%{http_code}' \"http://localhost:$P7/api/state?t=$TOK\")\" \"200\"\n+is \"so does a bearer header\"          \"$(curl -s -o /dev/null -w '%{http_code}' -H \"Authorization: Bearer $TOK\" \"http://localhost:$P7/api/state\")\" \"200\"\n+# The URL already open on a phone must survive a restart, or the token is a\n+# feature that breaks the feature it is protecting.\n+is \"and it survives a restart\" \"$(awk '/^  token /{print $2}' \"$ROOT/tok2.out\")\" \"$TOK\"\n+is \"loopback stays open\"       \"$(curl -s -o /dev/null -w '%{http_code}' \"http://localhost:$P8/api/state\")\" \"200\"\n+is \"--no-token is a real way out\"  \"$(curl -s -o /dev/null -w '%{http_code}' \"http://localhost:$P9/api/state\")\" \"200\"\n+\n+# The gateway cannot use the bind rule: it binds loopback and is then TUNNELLED,\n+# which no address check can see. So it mints unconditionally.\n+echo '== the gateway is public by definition'\n+is \"it mints without being asked\"   \"$([ -n \"$(awk '/^  token /{print $2}' \"$ROOT/gw.out\")\" ] && echo yes)\" \"yes\"\n+is \"and refuses an untokened read\"  \"$(curl -s -o /dev/null -w '%{http_code}' \"http://localhost:$PG/api/state\")\" \"401\"\n+\n+echo '== an old Node is told, not crashed into'\n+sed 's/^const nodeMajor = .*/const nodeMajor = 16;/' \"$B\" > \"$ROOT/old.mjs\"\n+node \"$ROOT/old.mjs\" status --state \"$S7\" >\"$ROOT/old.out\" 2>&1\n+is \"it exits nonzero\"     \"$?\" \"1\"\n+is \"and names the floor\"  \"$(grep -c 'needs Node 18 or newer' \"$ROOT/old.out\")\" \"1\"\n```",
+   "recommendation": "The old-Node check works by `sed`-ing `const nodeMajor = …` into a copy of `board.mjs`. That is a test coupled to a **line of source text** — rename the variable and the test silently starts asserting against an unmodified file, which still exits 0 and fails loudly rather than passing wrongly. Loud, but the coupling is real.\n\nI also did not test the `--token X` explicit-value path, only `--token`-by-inference, `--no-token` and loopback. It is the least likely to break and the most annoying to set up, which is a bad reason.",
+   "options": [
+    {
+     "key": "ok",
+     "label": "Looks right",
+     "detail": "Accepted as written.",
+     "recommended": true
+    },
+    {
+     "key": "revise",
+     "label": "Change the code",
+     "detail": "The decision stands — say what to change and I rewrite it.",
+     "recommended": false
+    },
+    {
+     "key": "reopen",
+     "label": "Wrong call — reopen q5",
+     "detail": "Sends q5 back to be decided again, and this gets rebuilt from the new answer.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T12:32:17.063Z",
+   "openedAt": "2026-08-27T12:32:17.063Z",
+   "answer": {
+    "keys": [
+     "ok"
+    ],
+    "text": null,
+    "at": "2026-08-27T12:32:39.289Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q28",
+   "parentId": null,
+   "depth": 0,
+   "thread": "Review",
+   "title": "The README leads with the problem, and the reference moves below the fold",
+   "spoken": "The readme now opens on the problem instead of comparing itself to grill-me, because there isn't one official grill-me — I found eight, none canonical — so that sentence was jargon to most readers. Grill-me is still there as an aside with a link. The first screen also now mentions that it builds and reviews, which it didn't before. And there's a new troubleshooting section covering the seven things a stranger actually hits.",
+   "spokenDetail": "**The opening no longer names `/grill-me` in the sentence that decides whether someone keeps reading.** I found at least eight separate grill-me repos and none of them official, so the old second paragraph was jargon-plus-a-dead-end for anyone without the prior. It now opens on the problem, which needs no priors at all:\n\n> Answering an agent's questions one at a time is the slowest part of working with one. It asks, you think, it waits. You answer, it thinks, you wait. And because a chat line is small, the questions come out small too — so the ones that actually decide the shape of the thing never get asked.\n\ngrill-me survives as a blockquote aside, linked to the most-referenced repo, so the credit and the shorthand are both still there for the people it lands with.\n\nThe first screen also now says the build half exists. The old opening described a Q&A tool and left plan → **Start building** → checklist → review to be discovered 100 lines down — which undersold roughly half of what this is.\n\n**Sections reordered, not rewritten.** Every word you had is still here; what changed is what comes first:\n\n```\nbefore                          after\n  Install                         Install\n  Answering       (keyboard)      Building, and reviewing what got built\n  Building…                       Several agents on one build\n  Several agents                  Answering       (keyboard — reference)\n  Answering out loud              Answering out loud\n  How it works                    If it doesn't work            ← new\n  Licence                         How it works\n                                  Licence\n```\n\n**New `If it doesn't work` section** — a seven-row table of the failures a stranger actually hits: old Node, the `?t=` they did not ask for, a link that 401s after a restart, an empty board, the firewall prompt, no free port, the stale-server warning. Each says what it *is*, not just what to type.\n\nAnd two paragraphs that the token work made false are now true: Install explains the `?t=`, and the voice section's *\"`--token` is not optional\"* is now the gateway's always-on rule with the tunnel reasoning spelled out.",
+   "kind": "review",
+   "changeId": "c6",
+   "testId": null,
+   "context": "**The opening no longer names `/grill-me` in the sentence that decides whether someone keeps reading.** I found at least eight separate grill-me repos and none of them official, so the old second paragraph was jargon-plus-a-dead-end for anyone without the prior. It now opens on the problem, which needs no priors at all:\n\n> Answering an agent's questions one at a time is the slowest part of working with one. It asks, you think, it waits. You answer, it thinks, you wait. And because a chat line is small, the questions come out small too — so the ones that actually decide the shape of the thing never get asked.\n\ngrill-me survives as a blockquote aside, linked to the most-referenced repo, so the credit and the shorthand are both still there for the people it lands with.\n\nThe first screen also now says the build half exists. The old opening described a Q&A tool and left plan → **Start building** → checklist → review to be discovered 100 lines down — which undersold roughly half of what this is.\n\n**Sections reordered, not rewritten.** Every word you had is still here; what changed is what comes first:\n\n```\nbefore                          after\n  Install                         Install\n  Answering       (keyboard)      Building, and reviewing what got built\n  Building…                       Several agents on one build\n  Several agents                  Answering       (keyboard — reference)\n  Answering out loud              Answering out loud\n  How it works                    If it doesn't work            ← new\n  Licence                         How it works\n                                  Licence\n```\n\n**New `If it doesn't work` section** — a seven-row table of the failures a stranger actually hits: old Node, the `?t=` they did not ask for, a link that 401s after a restart, an empty board, the firewall prompt, no free port, the stale-server warning. Each says what it *is*, not just what to type.\n\nAnd two paragraphs that the token work made false are now true: Install explains the `?t=`, and the voice section's *\"`--token` is not optional\"* is now the gateway's always-on rule with the tunnel reasoning spelled out.\n\n**Files** — `README.md:1-45`, `README.md:60-64`, `README.md:255-300`\n\n**Because you decided**\n\n- **q8** grill-me's whole README is 200 words. Yours is 326 lines. Which is right?\n  → Pitch on top, reference moves down or into docs/\n- **q9** Your first paragraph compares it to /grill-me. There is no official /grill-me.\n  → Lead with the problem; comparison becomes an aside\n- **q10** There is no troubleshooting section, and first-run failures are silent-ish\n  → Version check + a short \"If it doesn't work\" section\n\n```diff\n--- a/README.md\n+++ b/README.md\n@@ -1,15 +1,30 @@\n # grill-board\n \n-A Claude Code skill that interrogates a plan through a **live web board** instead\n-of one blocking question at a time.\n-\n-`/grill-me` asks one question, then waits. You answer, it thinks, you wait again.\n-`grill-board` posts questions to a page you keep open: answer whichever you like,\n-in whatever order, whenever. Each answer wakes the session, which branches\n-follow-ups into that thread **while you carry on answering the others**.\n+Answering an agent's questions one at a time is the slowest part of working with\n+one. It asks, you think, it waits. You answer, it thinks, you wait. And because\n+a chat line is small, the questions come out small too — so the ones that\n+actually decide the shape of the thing never get asked.\n+\n+**grill-board puts them on a page instead.** Questions appear as cards on a\n+local web board you keep open. Answer whichever you like, in whatever order,\n+whenever — each answer wakes the session, which branches follow-ups into that\n+thread **while you carry on answering the others**. Nothing waits on anything.\n \n@@ -20,6 +35,20 @@\n+Because a card is a page and not a chat line, the question can carry what it\n+takes to answer it: the code, the tradeoff table, the two file paths, the number\n+that makes one option worse than the other.\n+\n+**And it doesn't stop when the questions do.** The board drains, the plan goes\n+up, you press **Start building** — and every change comes back as a card with\n+the answers that caused it printed above the diff.\n+\n@@ -45,6 +74,9 @@\n+> If you have used [`/grill-me`](https://github.com/robmitt/grill-me-skill),\n+> this is its asynchronous sibling — same idea, except you are never the one\n+> waiting.\n \n@@ -61,3 +93,7 @@\n It prints a `localhost` URL and a LAN one — the board answers fine from a phone.\n+Both carry a `?t=` token, because a board that listens on the network is\n+writable by whoever can reach it. `--host 127.0.0.1` keeps it on this machine\n+and drops the token; `--no-token` serves it open on a network you trust.\n \n@@ -296,7 +332,11 @@\n-**`--token` is not optional once the board leaves your machine.** Without it the\n-board is readable and *writable* by anyone who can reach the URL, which is a\n-problem the moment you tunnel it. It's accepted as `?t=` or a bearer header.\n+**The gateway always has a token**, whether you ask for one or not — unlike the\n+board, which decides by looking at what it binds to. It cannot do that here: it\n+binds loopback and is then *tunnelled*, and no address check can see a tunnel.\n+What sits behind that URL is not read-only either; `answer` and `ask_better` are\n+writable, so an open tunnel is a stranger answering your cards.\n\n+## If it doesn't work\n+\n+| what you see | what it is |\n+|---|---|\n+| `grill-board needs Node 18 or newer` | exactly that. `nvm install 18`… |\n+| the URL has a `?t=…` on it | a board that binds past loopback mints a token… |\n+| a link that worked yesterday now 401s | you restarted a board that had no token… |\n+| the board opens but stays empty | usually right — Claude is still reading… |\n+| macOS or Windows asks to allow incoming connections | the default bind is `0.0.0.0`… |\n+| `no free port in 7800-7859` | sixty boards, or something else on those ports… |\n+| a command warns the server is older than `board.mjs` | you updated the skill under a running board… |\n```",
+   "recommendation": "The README grew 326 → 358 lines, which cuts against q8's spirit even though the order is now right. The pitch is the first screen and everything else is below it, but I moved sections rather than trimming any — so if it still reads long to you, the fix is deletion and I have not done any.\n\nI also asserted **\"at least eight grill-me repos\"** in the opening's reasoning from a single web search. The claim in the README itself is softer than that (it just links one), but the decision to demote the comparison rests on that search and nothing more.",
+   "options": [
+    {
+     "key": "ok",
+     "label": "Looks right",
+     "detail": "Accepted as written.",
+     "recommended": true
+    },
+    {
+     "key": "revise",
+     "label": "Change the code",
+     "detail": "The decision stands — say what to change and I rewrite it.",
+     "recommended": false
+    },
+    {
+     "key": "reopen",
+     "label": "Wrong call — reopen q8",
+     "detail": "Sends q8 back to be decided again, and this gets rebuilt from the new answer.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T12:32:17.063Z",
+   "openedAt": "2026-08-27T12:32:17.063Z",
+   "answer": {
+    "keys": [
+     "ok"
+    ],
+    "text": null,
+    "at": "2026-08-27T12:32:42.373Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q29",
+   "parentId": null,
+   "depth": 0,
+   "thread": "Review",
+   "title": "A static demo that is the real board.html, not a copy of it",
+   "spoken": "The demo works as a plain static page — I served it over http and it rendered sixteen cards and the eight build steps, with the read-only ribbon along the bottom. The important part is it isn't a copy of the board page: it's generated from the real one, and the test suite fails if anyone changes the page without regenerating. One thing outstanding — the board it shows stops at the build, because the checklist and review haven't happened yet. That's one command to redo once they have.",
+   "spokenDetail": "`demo/index.html` renders a real board on a static host, and **there is no forked page to keep in step**. It is generated: `build.mjs` reads the actual `../board.html` and injects three things above `</head>` — a frozen state, a `fetch` shim, and a ribbon stylesheet.\n\nThe ordering is the whole correctness argument. The page polls `/api/state` on its first tick, so the shim has to replace `fetch` before the page's own script runs — injecting just above `</head>` is the last point that is still early enough.\n\n**Read-only, and it does not look broken.** Writes are accepted and dropped. The page updates optimistically and its next poll sees an unchanged `rev`, so it never re-renders over what you clicked — a card you answer stays answered on screen and nothing is recorded. A fixed ribbon says exactly that, and links back to the repo.\n\n**The rot problem you have already been bitten by is closed.** `build.mjs --check` regenerates and diffs, and the suite runs it — so a change to `board.html` that nobody regenerated is a red test, not a demo quietly showing last month's board. Two more checks assert no token and no home directory got baked into a page destined for the public internet.\n\n`trim.mjs` produces the state from a **real** board, emitting exactly the `GET /api/state` payload rather than the raw file, and scrubbing the token and `$HOME` on the way through.\n\nVerified served over plain HTTP with `python3 -m http.server`: **16 cards, 8 build steps, phase `building`, ribbon up, `fetch` patched, no offline banner, no stale-server warning.** Suite is 70 → 75, all green.",
+   "kind": "review",
+   "changeId": "c7",
+   "testId": null,
+   "context": "`demo/index.html` renders a real board on a static host, and **there is no forked page to keep in step**. It is generated: `build.mjs` reads the actual `../board.html` and injects three things above `</head>` — a frozen state, a `fetch` shim, and a ribbon stylesheet.\n\nThe ordering is the whole correctness argument. The page polls `/api/state` on its first tick, so the shim has to replace `fetch` before the page's own script runs — injecting just above `</head>` is the last point that is still early enough.\n\n**Read-only, and it does not look broken.** Writes are accepted and dropped. The page updates optimistically and its next poll sees an unchanged `rev`, so it never re-renders over what you clicked — a card you answer stays answered on screen and nothing is recorded. A fixed ribbon says exactly that, and links back to the repo.\n\n**The rot problem you have already been bitten by is closed.** `build.mjs --check` regenerates and diffs, and the suite runs it — so a change to `board.html` that nobody regenerated is a red test, not a demo quietly showing last month's board. Two more checks assert no token and no home directory got baked into a page destined for the public internet.\n\n`trim.mjs` produces the state from a **real** board, emitting exactly the `GET /api/state` payload rather than the raw file, and scrubbing the token and `$HOME` on the way through.\n\nVerified served over plain HTTP with `python3 -m http.server`: **16 cards, 8 build steps, phase `building`, ribbon up, `fetch` patched, no offline banner, no stale-server warning.** Suite is 70 → 75, all green.\n\n**Files** — `demo/build.mjs`, `demo/trim.mjs`, `demo/shim.js`, `demo/style.css`, `demo/index.html`, `test-build.sh:330-345`\n\n**Because you decided**\n\n- **q4** You said it has to land. So what does a stranger actually SEE?\n  → Live clickable demo on GitHub Pages\n- **q7** On the demo — can they answer a card, or only look at one?\n  → Read-only snapshot\n- **q13** What board is the demo showing — mid-grill, or the whole arc?\n  → The whole arc — grill, plan, checklist, review\n\n```diff\n--- /dev/null\n+++ b/demo/build.mjs\n@@ -0,0 +1,52 @@\n+// Generates demo/index.html from the REAL board.html plus a frozen state.\n+//\n+// The point is that there is no second copy of the page to keep in step. The\n+// demo is board.html with two <script> tags and a stylesheet injected, and\n+// `--check` re-runs the generation and fails if the committed output has\n+// drifted — so a change to board.html that nobody regenerated is a red test,\n+// not a demo that quietly shows last month's board.\n+const page = readFileSync(join(HERE, '..', 'board.html'), 'utf8');\n+const marker = '</head>';\n+if (!page.includes(marker)) throw new Error('board.html has no </head> to inject before');\n+\n+// Order matters and is the whole correctness argument: the state, then the\n+// shim that closes over it, then the page's own script — which polls on its\n+// first tick and must find `fetch` already replaced.\n+const inject =\n+  `<style>\\n${read('style.css')}</style>\\n` +\n+  `<script>window.__DEMO_STATE__ = ${JSON.stringify(state)};</script>\\n` +\n+  `<script>\\n${read('shim.js')}</script>\\n`;\n+\n+const out = page.replace(marker, `${inject}${marker}`);\n+\n+if (process.argv.includes('--check')) {\n+  if (have === out) { process.stdout.write('demo/index.html is current\\n'); process.exit(0); }\n+  process.stderr.write('demo/index.html is STALE — board.html, the shim or the state changed under it.\\n');\n+  process.exit(1);\n+}\n\n--- /dev/null\n+++ b/demo/shim.js\n@@ -0,0 +1,38 @@\n+// Read-only on purpose. Writes are accepted and dropped: the page updates\n+// optimistically and its next poll sees an unchanged `rev`, so it never\n+// re-renders over what you just clicked — nothing looks broken, and nothing is\n+// recorded. The banner says so, because a demo that silently discards your\n+// answers has to admit it.\n+  const real = window.fetch.bind(window);\n+  window.fetch = (input, init) => {\n+    const url = String(typeof input === 'string' ? input : input.url || '');\n+    const path = url.split('?')[0].replace(/^.*\\/\\//, '').replace(/^[^/]*/, '');\n+    if (!path.startsWith('/api/')) return real(input, init);\n+    if (path === '/api/state') return Promise.resolve(ok(STATE));\n+    // Everything else is a write. Say yes, change nothing.\n+    return Promise.resolve(ok({ ok: true, demo: true }));\n+  };\n\n--- /dev/null\n+++ b/demo/trim.mjs\n@@ -0,0 +1,54 @@\n+// It emits exactly the payload `GET /api/state` emits, because that is the only\n+// shape the page knows how to read — anything else is a demo that renders\n+// almost right. Two things get stripped and both matter: the board's TOKEN,\n+// which must never reach a public page, and absolute paths.\n+  // Frozen. The page re-renders only when this changes, which is exactly why a\n+  // click sticks instead of being reverted by the next poll.\n+  rev: 1,\n+if (home) text = text.split(home).join('~');\n+if (cur.token) text = text.split(cur.token).join('DEMO');\n\n--- a/test-build.sh\n+++ b/test-build.sh\n@@ -330,0 +331,12 @@\n+echo '== the demo has not rotted'\n+node \"$(dirname \"$B\")/demo/build.mjs\" --check >\"$ROOT/demo.out\" 2>&1\n+is \"demo/index.html is current\" \"$?\" \"0\"\n+is \"the state is injected once\" \"$(grep -c 'window.__DEMO_STATE__ =' \"$(dirname \"$B\")/demo/index.html\")\" \"1\"\n+is \"and it is the real page\"    \"$(grep -c 'id=\\\"buildPanel\\\"' \"$(dirname \"$B\")/demo/index.html\")\" \"1\"\n+# A token or a home directory baked into a page served on the public internet is\n+# the one mistake here that cannot be taken back.\n+is \"no token baked in\"   \"$(grep -cE '\\?t=[a-z0-9]{20}' \"$(dirname \"$B\")/demo/index.html\")\" \"0\"\n+is \"no home path baked in\" \"$(grep -c \"$HOME\" \"$(dirname \"$B\")/demo/index.html\")\" \"0\"\n```",
+   "recommendation": "**The state is this board, mid-build — so it stops at `building`.** q13 asked for the whole arc through checklist and review, and that does not exist yet because this build is what would produce it. The machinery is done; the content is a step behind. I intend to re-run `trim.mjs` against this same board once it has been through the checklist and the reviews, which is one command — but if that is forgotten, the demo ships showing two thirds of the arc.\n\nThe injection point is the literal string `</head>`. `build.mjs` throws if it is missing, so it fails loudly, but it is still a generator coupled to a substring of the page.\n\nThe suite is now noticeably slower — the token section starts six short-lived servers. It ran past a two-minute timeout on the first attempt, which was the timeout and not a hang, but it is close enough to be worth knowing.",
+   "options": [
+    {
+     "key": "ok",
+     "label": "Looks right",
+     "detail": "Accepted as written.",
+     "recommended": true
+    },
+    {
+     "key": "revise",
+     "label": "Change the code",
+     "detail": "The decision stands — say what to change and I rewrite it.",
+     "recommended": false
+    },
+    {
+     "key": "reopen",
+     "label": "Wrong call — reopen q4",
+     "detail": "Sends q4 back to be decided again, and this gets rebuilt from the new answer.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T12:32:17.063Z",
+   "openedAt": "2026-08-27T12:32:17.063Z",
+   "answer": {
+    "keys": [
+     "ok"
+    ],
+    "text": null,
+    "at": "2026-08-27T12:32:44.094Z"
+   },
+   "retiredReason": null
+  },
+  {
+   "id": "q30",
+   "parentId": null,
+   "depth": 0,
+   "thread": "Review",
+   "title": "A GIF that replays a real board, generated rather than recorded",
+   "spoken": "The gif is done — eleven seconds, one megabyte, and it's at the top of the readme. It's not a screen recording: it replays this actual board, winding the cards back to unanswered and letting them forward a beat at a time, so everything in it was really written and really answered. Two things need you. The demo link points at a github pages url that doesn't exist until you switch pages on, and both the gif and the demo stop at the build phase because the checklist and review haven't happened yet.",
+   "spokenDetail": "**`docs/grill-board.gif` — 16 frames, 11 seconds, 1.0 MB**, well inside GitHub's inline limit. It is now the first thing on the page, above the ASCII diagram, with the demo linked underneath it.\n\nIt is not a screen recording. `reel.mjs` **replays this actual board**: it winds the cards back to unanswered, then lets them forward one beat at a time — three cards, you answer one, three more appear, the board drains, the plan goes up and sits there waiting for **Start building**, then the steps tick over. Every word in it was really written and really answered, which is what q13 asked for and what an invented board never manages.\n\nThe pipeline is three commands and no dependencies beyond what was already on the machine:\n\n```bash\nnode demo/reel.mjs <state.json>     # 16 standalone HTML frames\n# headless Chrome --screenshot over each\nffmpeg -framerate 1.4 ... palettegen/paletteuse\n```\n\n**Frames render through `build.mjs`'s `render()` — the same function the demo uses.** Two renderers would drift, and the one that drifted would be the one nobody looks at until it is already in a README. The ribbon is suppressed for frames, since *\"nothing is saved\"* is noise on a page nobody is clicking.\n\n**And a real bug caught on the way past.** `.gitignore` had a blanket `state.json` — which silently swallowed `demo/state.json`. The demo would have been committed as a page with no board in it, and the first person to load it would have seen an empty board. `!demo/state.json` now exempts it, verified with `git check-ignore` and a dry-run `git add`.",
+   "kind": "review",
+   "changeId": "c8",
+   "testId": null,
+   "context": "**`docs/grill-board.gif` — 16 frames, 11 seconds, 1.0 MB**, well inside GitHub's inline limit. It is now the first thing on the page, above the ASCII diagram, with the demo linked underneath it.\n\nIt is not a screen recording. `reel.mjs` **replays this actual board**: it winds the cards back to unanswered, then lets them forward one beat at a time — three cards, you answer one, three more appear, the board drains, the plan goes up and sits there waiting for **Start building**, then the steps tick over. Every word in it was really written and really answered, which is what q13 asked for and what an invented board never manages.\n\nThe pipeline is three commands and no dependencies beyond what was already on the machine:\n\n```bash\nnode demo/reel.mjs <state.json>     # 16 standalone HTML frames\n# headless Chrome --screenshot over each\nffmpeg -framerate 1.4 ... palettegen/paletteuse\n```\n\n**Frames render through `build.mjs`'s `render()` — the same function the demo uses.** Two renderers would drift, and the one that drifted would be the one nobody looks at until it is already in a README. The ribbon is suppressed for frames, since *\"nothing is saved\"* is noise on a page nobody is clicking.\n\n**And a real bug caught on the way past.** `.gitignore` had a blanket `state.json` — which silently swallowed `demo/state.json`. The demo would have been committed as a page with no board in it, and the first person to load it would have seen an empty board. `!demo/state.json` now exempts it, verified with `git check-ignore` and a dry-run `git add`.\n\n**Files** — `docs/grill-board.gif`, `demo/reel.mjs`, `demo/build.mjs:30-48`, `demo/shim.js:34`, `README.md:12-18`, `.gitignore:5-10`\n\n**Because you decided**\n\n- **q12** Read-only demo — so now nothing shows the loop. Does that need fixing?\n  → Read-only demo + a GIF in the README\n\n```diff\n--- /dev/null\n+++ b/demo/reel.mjs\n@@ -0,0 +1,84 @@\n+// q12 settled that the demo and the GIF do different jobs: the demo proves the\n+// board is real, and only the GIF can show that cards ARRIVE WHILE YOU ANSWER —\n+// a claim about time, which no still image can carry.\n+//\n+// So the frames are not invented. Each one is the same board at a different\n+// moment: cards un-answered and removed to wind it back, then let forward one\n+// beat at a time. Every word in it was really written and really answered.\n+const shot = (nCards, nAnswered, phase, nSteps) => {\n+  const questions = qs.slice(0, nCards).map((q, i) => (i < nAnswered ? q : {\n+    ...q, status: 'open', answer: null, ask: null,\n+  }));\n+\n+// The beat sheet. Held frames at the moments that carry the argument — the\n+// board filling up, and the plan sitting there waiting to be started.\n+const FRAMES = [\n+  ['grilling', 3, 0, 0], ['grilling', 3, 0, 0],\n+  ['grilling', 3, 1, 0],\n+  ['grilling', 6, 2, 0],            // <- answering one made three more appear\n+  ...\n+  ['planned', 16, 16, 0], ['planned', 16, 16, 0],   // the button, held\n+  ['building', 16, 16, 2],\n+];\n\n--- a/demo/build.mjs\n+++ b/demo/build.mjs\n@@ -28,6 +28,13 @@\n+// Exported so `reel.mjs` renders its frames through the SAME path the demo\n+// uses. Two renderers would drift, and the one that drifted would be the one\n+// nobody looks at until it is in a README.\n+export function render(st, { ribbon = true } = {}) {\n\n--- a/README.md\n+++ b/README.md\n@@ -11,6 +11,12 @@\n+![A board filling up as questions are answered, then the plan going up and the build ticking over](docs/grill-board.gif)\n+\n+*Three cards. You answer one, three more appear. The board drains, the plan goes\n+up and waits, and the steps tick over — [try the board yourself](https://musabilhan.github.io/grill-board/demo/),\n+it is the real page with a real grill frozen in it.*\n+\n\n--- a/.gitignore\n+++ b/.gitignore\n@@ -5,2 +5,7 @@\n state.json\n+# ...except the demo's, which is a committed artefact and not a live board. The\n+# blanket rule above silently swallowed it, which would have shipped a demo page\n+# with no board in it.\n+!demo/state.json\n+\n+demo/reel/\n```",
+   "recommendation": "**The GIF stops at `building`, for the same reason the demo state does** — the checklist and the review cards do not exist yet, because this build is what produces them. Both want regenerating once this board has been through review, and both are one command. If that is skipped, the two artefacts that carry the whole pitch show two thirds of the arc.\n\nThe capture step is a `for` loop over headless Chrome in my shell, not a script in the repo — so \"how do I regenerate the GIF\" is currently answered by this change entry and nowhere else. It should be a `demo/reel.sh`, and is not.\n\nThe demo link in the README points at `musabilhan.github.io/grill-board/demo/`, which **does not exist yet** — GitHub Pages has to be switched on for the repo, serving from the `main` branch root. Until you do that, the README has a dead link in its second paragraph.",
+   "options": [
+    {
+     "key": "ok",
+     "label": "Looks right",
+     "detail": "Accepted as written.",
+     "recommended": true
+    },
+    {
+     "key": "revise",
+     "label": "Change the code",
+     "detail": "The decision stands — say what to change and I rewrite it.",
+     "recommended": false
+    },
+    {
+     "key": "reopen",
+     "label": "Wrong call — reopen q12",
+     "detail": "Sends q12 back to be decided again, and this gets rebuilt from the new answer.",
+     "recommended": false
+    }
+   ],
+   "multi": false,
+   "status": "answered",
+   "askedAt": "2026-08-27T12:32:17.065Z",
+   "openedAt": "2026-08-27T12:32:17.065Z",
+   "answer": {
+    "keys": [
+     "ok"
+    ],
+    "text": null,
+    "at": "2026-08-27T12:32:45.667Z"
+   },
+   "retiredReason": null
+  }
+ ]
+}

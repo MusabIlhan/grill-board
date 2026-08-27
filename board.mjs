@@ -25,6 +25,24 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { networkInterfaces, homedir } from 'node:os';
 
+// The floor the README claims, enforced rather than hoped for. Without this an
+// old Node throws somewhere in the middle of 2,100 lines and a stranger reads
+// it as "this tool is broken" — which is not a bug report anyone files, it is a
+// closed tab. Note what it CANNOT catch: if a future edit uses syntax an old
+// Node cannot parse, the file dies before this line runs. Nothing in here does
+// today (no `.at`, no `findLast`, no `Object.hasOwn`, no `structuredClone`), so
+// keep it that way and this check stays the whole story.
+const NODE_MIN = 18;
+const nodeMajor = Number(process.versions.node.split('.')[0]);
+if (nodeMajor < NODE_MIN) {
+  process.stderr.write(
+    `grill-board needs Node ${NODE_MIN} or newer — this is Node ${process.versions.node}.\n` +
+    '  nvm install 18   (or brew install node / your package manager)\n' +
+    '  Nothing else is required: no dependencies, nothing to build.\n'
+  );
+  process.exit(1);
+}
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_MAX_OPEN = 8;
 
@@ -1231,8 +1249,26 @@ function makeHandler(boardPath) {
   };
 }
 
+// Which addresses mean "only this machine". Anything else is reachable by
+// something that is not you, which is the whole basis of the token rule below.
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
+
 async function serve() {
   const p = statePath();
+  const host = args.host || '0.0.0.0';
+  // A board that binds past loopback is readable AND WRITABLE by anything that
+  // can reach the port, and writable means someone else answering a card the
+  // session then acts on — an injection path into what gets built, not just a
+  // leak. The README used to warn about this 250 lines down, which is a bet on
+  // strangers reading the whole page. So the token is minted for them: the
+  // phone URL still works, it just carries `?t=` now.
+  //
+  // `--token` still forces one on (and `--token X` still sets it), `--no-token`
+  // is the deliberate way back to an open board on a network you trust.
+  const want = args['no-token'] ? false
+    : typeof args.token === 'string' ? args.token
+    : args.token ? true
+    : !LOOPBACK.has(host);
   // Two grills on the same subject the same day derive the same state path, and
   // the result used to be silent: both bound a port, both served ONE file, the
   // later title won and each URL showed the other's questions merged in. Several
@@ -1257,11 +1293,10 @@ async function serve() {
     if (args['max-open']) cur.maxOpen = Number(args['max-open']);
     // Persisted so a restart keeps the same URL — otherwise every restart
     // invalidates the link already open on a phone.
-    if (args.token) cur.token = args.token === true ? (cur.token || randomToken()) : String(args.token);
-    TOKEN = args.token ? cur.token : null;
+    if (want) cur.token = typeof want === 'string' ? want : (cur.token || randomToken());
+    TOKEN = want ? cur.token : null;
   });
 
-  const host = args.host || '0.0.0.0';
   const port = await findPort(host, args.port);
   // Claim the voice gateway — the newest board is the one you talk to — but
   // register too, so the others stay reachable by name.
@@ -1281,7 +1316,15 @@ async function serve() {
     process.stdout.write(`  local  ${local}\n`);
     if (phone) process.stdout.write(`  phone  ${phone}\n`);
     process.stdout.write(`  mcp    http://localhost:${port}/mcp${q}\n`);
-    if (TOKEN) process.stdout.write(`  token  ${TOKEN}  (also accepted as: Authorization: Bearer …)\n`);
+    if (TOKEN) {
+      process.stdout.write(`  token  ${TOKEN}  (also accepted as: Authorization: Bearer …)\n`);
+      // Say why, once, or an unexplained token in the URL reads as a bug. It is
+      // persisted, so this line is about the FIRST run on a given board.
+      if (!args.token) {
+        process.stdout.write(`         minted because this binds ${host}, not loopback — the URLs above carry it.\n`);
+        process.stdout.write(`         --host 127.0.0.1 for this machine only · --no-token to serve it open\n`);
+      }
+    }
     process.stdout.write(`  state  ${p}\n`);
   });
 }
@@ -2048,8 +2091,17 @@ function cmdExport() {
 // connector every session, which nobody sustains.
 async function cmdGateway() {
   const prefs = loadPrefs();
-  if (args.token) {
-    prefs.gatewayToken = args.token === true ? (prefs.gatewayToken || randomToken()) : String(args.token);
+  // The gateway is the one command here whose ONLY purpose is to be reached
+  // from somewhere else — the README tells you to point cloudflared at it. So
+  // the bind-address rule `serve` uses is useless here: the bind is loopback
+  // and the reachability is the open internet, and a process cannot see a
+  // tunnel. It mints unconditionally instead, and `--no-token` is the way out.
+  //
+  // What is behind that URL is not read-only. `answer`, `ask_better` and
+  // `use_board` are all writable over /mcp — an untokened tunnel is a stranger
+  // answering your cards, which the session then builds from.
+  if (!args['no-token']) {
+    prefs.gatewayToken = typeof args.token === 'string' ? args.token : (prefs.gatewayToken || randomToken());
     savePrefs(prefs);
     TOKEN = prefs.gatewayToken;
   }
@@ -2063,6 +2115,7 @@ async function cmdGateway() {
     process.stdout.write(`  mcp     http://localhost:${port}/mcp${q}\n`);
     process.stdout.write(`  board   http://localhost:${port}/${q}\n`);
     if (TOKEN) process.stdout.write(`  token   ${TOKEN}\n`);
+    else process.stdout.write('  token   NONE — --no-token was passed. Do not tunnel this.\n');
     process.stdout.write(`  current ${getCurrent() || '(nothing running yet)'}\n`);
     process.stdout.write('  follows whichever board is serving — start one and it appears here.\n');
   });

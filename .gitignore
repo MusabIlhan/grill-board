@@ -3,6 +3,13 @@
 *.tmp
 url
 state.json
+# ...except the demo's, which is a committed artefact and not a live board. The
+# blanket rule above silently swallowed it, which would have shipped a demo page
+# with no board in it.
+!demo/state.json
 
 .DS_Store
 node_modules/
+
+# GIF frames — regenerate with demo/reel.mjs; docs/grill-board.gif is the output
+demo/reel/

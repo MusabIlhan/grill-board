@@ -1,12 +1,20 @@
 # grill-board
 
-A Claude Code skill that interrogates a plan through a **live web board** instead
-of one blocking question at a time.
+Answering an agent's questions one at a time is the slowest part of working with
+one. It asks, you think, it waits. You answer, it thinks, you wait. And because
+a chat line is small, the questions come out small too — so the ones that
+actually decide the shape of the thing never get asked.
 
-`/grill-me` asks one question, then waits. You answer, it thinks, you wait again.
-`grill-board` posts questions to a page you keep open: answer whichever you like,
-in whatever order, whenever. Each answer wakes the session, which branches
-follow-ups into that thread **while you carry on answering the others**.
+**grill-board puts them on a page instead.** Questions appear as cards on a
+local web board you keep open. Answer whichever you like, in whatever order,
+whenever — each answer wakes the session, which branches follow-ups into that
+thread **while you carry on answering the others**. Nothing waits on anything.
+
+![A board filling up as questions are answered, then the plan going up and the build ticking over](docs/grill-board.gif)
+
+*Three cards. You answer one, three more appear. The board drains, the plan goes
+up and waits, and the steps tick over — [try the board yourself](https://musabilhan.github.io/grill-board/demo/),
+it is the real page with a real grill frozen in it.*
 
 ```
 seed a batch ──► you answer any card ──► the session wakes ──► it branches that thread
@@ -14,13 +22,20 @@ seed a batch ──► you answer any card ──► the session wakes ──►
      └──────────────── new cards appear live ◄────────────────────────--┘
 ```
 
+Because a card is a page and not a chat line, the question can carry what it
+takes to answer it: the code, the tradeoff table, the two file paths, the number
+that makes one option worse than the other.
+
+**And it doesn't stop when the questions do.** The board drains, the plan goes
+up, you press **Start building** — and every change comes back as a card with
+the answers that caused it printed above the diff. Approve it, redirect it, or
+reopen the decision it came from.
+
 It works on a change as well as a plan. `/grill-board fix the retry loop`
 diagnoses first, then asks about the **implementation forks** — fix the cause or
 contain the symptom, change a shared function or fork it, this instance or the
 class — with the actual code in each card. You end up in the code decision
 instead of describing the bug.
-
-Then it builds what you decided, on the same board.
 
 Three things make it different from a chat prompt:
 
@@ -30,6 +45,10 @@ Three things make it different from a chat prompt:
 - **It doesn't end at agreement.** The board drains, the build appears on it
   step by step, and every change comes back as a card carrying the answers that
   produced it.
+
+> If you have used [`/grill-me`](https://github.com/robmitt/grill-me-skill),
+> this is its asynchronous sibling — same idea, except you are never the one
+> waiting.
 
 ## Install
 
@@ -46,58 +65,9 @@ Then, in Claude Code:
 ```
 
 It prints a `localhost` URL and a LAN one — the board answers fine from a phone.
-
-## Answering
-
-Everything works from the keyboard. Press <kbd>?</kbd> on the board for the list.
-
-Navigation has two levels — the cards, and the choices inside one card.
-**Up/down always moves. Right steps in, left steps back out.**
-
-```
-cards  ──→──  that card's choices  ──→──  typing your own
-       ←──                         ←── esc
-```
-
-| | |
-|---|---|
-| <kbd>W</kbd> <kbd>S</kbd> / <kbd>↑</kbd> <kbd>↓</kbd> | Up and down, on whichever level you're on |
-| <kbd>D</kbd> / <kbd>→</kbd> | Step in · <kbd>A</kbd> / <kbd>←</kbd> step out |
-| <kbd>N</kbd> | Next unanswered |
-| <kbd>1</kbd>–<kbd>9</kbd> | Pick a choice directly |
-| <kbd>space</kbd> | Take the highlighted choice — from the card level, Claude's pick |
-| <kbd>⌘↵</kbd> | Send — the same key on a choice as in the text |
-| <kbd>↵</kbd> | Reopen an answered card |
-| <kbd>C</kbd> <kbd>E</kbd> | Write your own · show Claude's take |
-| <kbd>T</kbd> <kbd>I</kbd> <kbd>V</kbd> | Ask simpler · implications · perspective |
-| <kbd>M</kbd> <kbd>L</kbd> <kbd>P</kbd> | Tell Claude something · light/dark · palette |
-
-**Start building** is the one control with no letter key, on purpose — tab to it
-and press space. A single keystroke that starts a build is the accident the
-button exists to prevent.
-
-Three ways to say **"I can't answer this yet"**, and they ask for different
-things back. **Ask simpler** — too dense as written, so it gets re-said plainly
-or split in two. **Implications** — you can read the options but not their
-consequences, so each one comes back with what it commits you to. **Perspective**
-— you lack the vantage point, so the question returns with what a decision like
-this actually turns on.
-
-None of them answers for you, and none drops the detail that made the question
-decidable. The card is retired and re-asked.
-
-A card you're merely passing over never shows a highlighted choice — a highlight
-you didn't put there reads as a decision already made for you. Choices you move
-through are provisional and vanish when you leave or start writing your own; one
-you actually pick (space, a number, a click) stays, so "option 2, but…" works.
-
-**Push back** is the one worth knowing about: it tells the session the *question*
-is wrong, and it retires and re-asks rather than defending it.
-
-Eight palettes ship (Gruvbox, Catppuccin, Nord, Solarized, Rosé Pine, Everforest,
-Tokyo Night, GitHub), light and dark. All 16 combinations were contrast-audited:
-every text pair clears WCAG AA, every glyph clears 3:1. Default is Nord dark; the
-choice persists across boards.
+Both carry a `?t=` token, because a board that listens on the network is
+writable by whoever can reach it. `--host 127.0.0.1` keeps it on this machine
+and drops the token; `--no-token` serves it open on a network you trust.
 
 ## Building, and reviewing what got built
 
@@ -240,6 +210,58 @@ nothing — so the lead knows which ones it still has to read back rather than
 finding out later. The same lines appear under the step on the board and on the
 review card, because a call nobody was asked about is exactly what review is for.
 
+## Answering
+
+Everything works from the keyboard. Press <kbd>?</kbd> on the board for the list.
+
+Navigation has two levels — the cards, and the choices inside one card.
+**Up/down always moves. Right steps in, left steps back out.**
+
+```
+cards  ──→──  that card's choices  ──→──  typing your own
+       ←──                         ←── esc
+```
+
+| | |
+|---|---|
+| <kbd>W</kbd> <kbd>S</kbd> / <kbd>↑</kbd> <kbd>↓</kbd> | Up and down, on whichever level you're on |
+| <kbd>D</kbd> / <kbd>→</kbd> | Step in · <kbd>A</kbd> / <kbd>←</kbd> step out |
+| <kbd>N</kbd> | Next unanswered |
+| <kbd>1</kbd>–<kbd>9</kbd> | Pick a choice directly |
+| <kbd>space</kbd> | Take the highlighted choice — from the card level, Claude's pick |
+| <kbd>⌘↵</kbd> | Send — the same key on a choice as in the text |
+| <kbd>↵</kbd> | Reopen an answered card |
+| <kbd>C</kbd> <kbd>E</kbd> | Write your own · show Claude's take |
+| <kbd>T</kbd> <kbd>I</kbd> <kbd>V</kbd> | Ask simpler · implications · perspective |
+| <kbd>M</kbd> <kbd>L</kbd> <kbd>P</kbd> | Tell Claude something · light/dark · palette |
+
+**Start building** is the one control with no letter key, on purpose — tab to it
+and press space. A single keystroke that starts a build is the accident the
+button exists to prevent.
+
+Three ways to say **"I can't answer this yet"**, and they ask for different
+things back. **Ask simpler** — too dense as written, so it gets re-said plainly
+or split in two. **Implications** — you can read the options but not their
+consequences, so each one comes back with what it commits you to. **Perspective**
+— you lack the vantage point, so the question returns with what a decision like
+this actually turns on.
+
+None of them answers for you, and none drops the detail that made the question
+decidable. The card is retired and re-asked.
+
+A card you're merely passing over never shows a highlighted choice — a highlight
+you didn't put there reads as a decision already made for you. Choices you move
+through are provisional and vanish when you leave or start writing your own; one
+you actually pick (space, a number, a click) stays, so "option 2, but…" works.
+
+**Push back** is the one worth knowing about: it tells the session the *question*
+is wrong, and it retires and re-asks rather than defending it.
+
+Eight palettes ship (Gruvbox, Catppuccin, Nord, Solarized, Rosé Pine, Everforest,
+Tokyo Night, GitHub), light and dark. All 16 combinations were contrast-audited:
+every text pair clears WCAG AA, every glyph clears 3:1. Default is Nord dark; the
+choice persists across boards.
+
 ## Answering out loud
 
 The board is also an MCP server, so another session — one with a voice mode, on
@@ -280,13 +302,32 @@ This covers the review too: `board_status` reports the build as it happens, and
 a review card's spoken detail is the change described in prose, never the diff.
 You can approve, redirect or reopen a decision without looking at anything.
 
-**`--token` is not optional once the board leaves your machine.** Without it the
-board is readable and *writable* by anyone who can reach the URL, which is a
-problem the moment you tunnel it. It's accepted as `?t=` or a bearer header.
+**The gateway always has a token**, whether you ask for one or not — unlike the
+board, which decides by looking at what it binds to. It cannot do that here: it
+binds loopback and is then *tunnelled*, and no address check can see a tunnel.
+What sits behind that URL is not read-only either; `answer` and `ask_better` are
+writable, so an open tunnel is a stranger answering your cards. `--no-token`
+exists and says out loud not to tunnel it. Tokens are accepted as `?t=` or as a
+bearer header.
 
 The seam is the state file, not HTTP — so an answer given by voice wakes the
 grilling session exactly as a keystroke does, and you can switch between phone
 and keyboard mid-board without telling either one.
+
+## If it doesn't work
+
+| what you see | what it is |
+|---|---|
+| `grill-board needs Node 18 or newer` | exactly that. `nvm install 18`, or your package manager. Nothing else is required — no dependencies, nothing to build. |
+| the URL has a `?t=…` on it | a board that binds past loopback mints a token, so the LAN link is not an open door. Keep the whole URL. `--host 127.0.0.1` for this machine only, `--no-token` to serve it open. |
+| a link that worked yesterday now 401s | you restarted a board that had no token and it minted one. Re-copy the URL it printed; it is stable from then on. |
+| the board opens but stays empty | usually right — Claude is still reading. If it lasts, check the session is alive; the state file keeps every answer either way. |
+| macOS or Windows asks to allow incoming connections | the default bind is `0.0.0.0`, which is what lets you answer from a phone. Decline it and use `--host 127.0.0.1`. |
+| `no free port in 7800-7859` | sixty boards, or something else on those ports. `--port N` picks one. |
+| a command warns the server is older than `board.mjs` | you updated the skill under a running board. It prints the exact restart command; nothing is lost, the state file is the truth. |
+
+Still stuck: the state file is plain JSON and holds every question, answer and
+change. `node board.mjs status --state <path>` prints what it thinks is going on.
 
 ## How it works
 
@@ -323,4 +364,8 @@ Notes on the parts that are less obvious than they look:
 
 ## Licence
 
-None yet — private.
+MIT — see [LICENSE](LICENSE). Use it, fork it, ship it.
+
+It comes as it is. I built this for my own work and put it up because it turned
+out to be worth having; issues are open and I read them, but I make no promise
+to answer or to keep anything stable. If you need it to stay put, fork it.
